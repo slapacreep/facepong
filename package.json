@@ -2,7 +2,7 @@
   "name": "facepong",
   "version": "1.0.0",
   "private": true,
-  "description": "Mobile face-controlled multiplayer pong (2v2 to 6v6)",
+  "description": "Mobile face-controlled multiplayer pong (1v1 to 6v6)",
   "scripts": {"start": "node server.js", "test": "node test.js"},
   "engines": {"node": ">=20"}
 }
