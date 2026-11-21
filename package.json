@@ -5,7 +5,7 @@
   "description": "Mobile face-controlled multiplayer pong (1v1 to 6v6)",
   "scripts": {
     "start": "node server.js",
-    "test": "node test.js && node integration-test.js && node music-test.js"
+    "test": "node test.js && node integration-test.js && node music-test.js && node axis-test.js"
   },
   "engines": {
     "node": ">=20"

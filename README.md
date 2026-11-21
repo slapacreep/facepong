@@ -60,9 +60,3 @@ Opt-in WebRTC voice, with participant mute/unmute and no automatic recording. Fo
 ## Microphone permission troubleshooting
 
 Use the **JOIN VOICE CHAT** button inside the HTTPS game page. It requests microphone access with `getUserMedia({ audio: true })` and displays a specific error if the browser cannot grant access. Camera permission does not grant microphone permission. If the prompt does not appear and the game says **Microphone blocked**, a previous denial may have been saved by the browser: change this site's microphone permission to **Allow** and reload. Open the full Render HTTPS URL directly in Chrome or Safari rather than inside another app's embedded browser. Joining voice is optional; players can remain muted or play with no mic. A secure microphone permission request cannot force the operating system to show a new prompt if access was already denied.
-
-## Rounds and movement (latest update)
-- A round is one serve/rally. A new round begins after every scored point.
-- Ball speed rises 10% each round, up to 1.8x the host-selected ball-speed setting.
-- Player tracking horizontal direction is reversed relative to the previous version to correct the reported inverted controls.
-- Default personal sensitivity is 88 rather than 110 (20% lower), with the slider still adjustable.
