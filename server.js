@@ -179,5 +179,5 @@ const server=http.createServer((req,res)=>{let p;try{p=decodeURIComponent(new UR
 server.on('upgrade',(req,socket)=>{if(new URL(req.url,'http://localhost').pathname==='/ws')upgrade(req,socket);else socket.destroy();});
 setInterval(()=>{for(const r of rooms.values()){tick(r,.05);if(r.phase==='playing'||r.phase==='finished'||r.phase==='countdown')broadcast(r,snapshot(r));}},50);
 setInterval(()=>{for(const [id,r] of rooms)if(!r.players.length||Date.now()-r.created>1000*60*60*12){rooms.delete(id);musicFiles.delete(id);}},60000);
-if(require.main===module)server.listen(PORT,'0.0.0.0',()=>console.log(`FACE PONG listening on http://localhost:${PORT}`));
+if(require.main===module)server.listen(PORT,'0.0.0.0',()=>console.log(`BALLFACE listening on http://localhost:${PORT}`));
 module.exports={server,rooms,zone,playerRadius,makeRoom,tick,addBot,removeBots,updateBots,playerSummary};

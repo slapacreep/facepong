@@ -1,4 +1,4 @@
-# FACE PONG — Portrait Multiplayer Prototype
+# BALLFACE — Portrait Multiplayer Prototype
 
 A mobile-first Node.js/WebSocket party game for **1v1 through 6v6**. Each phone shows its own team upright at the bottom and opponents upside down at the top. The ball rebounds off left/right walls; a point is conceded only if the entire ball crosses the goal line behind your team. Supports player-controlled teams and host-added bots.
 
@@ -56,3 +56,7 @@ Face avatars are circular webcam crops, not fully rigged 3D characters. Lobbies 
 ## Live voice chat
 
 Opt-in WebRTC voice, with participant mute/unmute and no automatic recording. For reliable connectivity across all networks and at 6v6 scale, configure a TURN server or use an SFU; the present direct peer-to-peer implementation is primarily for testing.
+
+## Microphone permission troubleshooting
+
+Use the **JOIN VOICE CHAT** button inside the HTTPS game page. It requests microphone access with `getUserMedia({ audio: true })` and displays a specific error if the browser cannot grant access. Camera permission does not grant microphone permission. If the prompt does not appear and the game says **Microphone blocked**, a previous denial may have been saved by the browser: change this site's microphone permission to **Allow** and reload. Open the full Render HTTPS URL directly in Chrome or Safari rather than inside another app's embedded browser. Joining voice is optional; players can remain muted or play with no mic. A secure microphone permission request cannot force the operating system to show a new prompt if access was already denied.

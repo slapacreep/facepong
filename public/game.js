@@ -6,7 +6,7 @@ const state={
  faceImages:new Map(),track:'tilt',controlX:.5,controlY:.5,neutral:null,landmarker:null,cameraStream:null,cameraOn:false,lastTrack:0,lastMove:0,lastFace:0,
  tracking:false,sound:true,lastHit:null,lastHitEvent:null,lastRound:0,lastVideoTime:-1,stillX:.5,stillY:.5,trackingError:'',cameraReady:false,lastCameraReport:null,
  mode:'points',targetPoints:7,durationMinutes:2,countdownAt:0,matchEndsAt:0,effects:[],recordHighlights:false,recordMic:false,micStream:null,
- mediaRecorder:null,audioChunks:[],audioBlobUrl:'',replayShots:[],recordingActive:false,theme:'blue',touchActive:false,voiceEnabled:false,voiceMuted:true,voiceStream:null,voicePeers:new Map(),music:null,musicVisible:true
+ mediaRecorder:null,audioChunks:[],audioBlobUrl:'',replayShots:[],recordingActive:false,theme:localStorage.getItem('facepong-style')==='pink'?'pink':'blue',touchActive:false,voiceEnabled:false,voiceMuted:true,voiceStream:null,voicePeers:new Map(),music:null,musicVisible:true
 };
 const canvas=$('arena'),ctx=canvas.getContext('2d');
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.remove('hidden');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.add('hidden'),3300);}
@@ -16,7 +16,16 @@ function roomFromURL(){return new URLSearchParams(location.search).get('room')?.
 function randomCode(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';return Array.from(crypto.getRandomValues(new Uint8Array(6)),x=>chars[x%chars.length]).join('');}
 function me(){return state.players.find(p=>p.id===state.id)||null;}
 function localTeam(){return me()?.team ?? 0;}
-function setTheme(){const team=localTeam();state.theme=team===1?'pink':'blue';document.body.classList.toggle('theme-pink',team===1);document.body.classList.toggle('theme-blue',team!==1);}
+function setTheme(style){
+ const selected=style||state.theme||'blue';state.theme=selected==='pink'?'pink':'blue';
+ document.body.classList.toggle('theme-pink',state.theme==='pink');
+ document.body.classList.toggle('theme-blue',state.theme==='blue');
+ $('styleBoy').classList.toggle('active',state.theme==='blue');
+ $('styleGirl').classList.toggle('active',state.theme==='pink');
+ $('styleBoy').setAttribute('aria-pressed',String(state.theme==='blue'));
+ $('styleGirl').setAttribute('aria-pressed',String(state.theme==='pink'));
+ document.querySelector('meta[name="theme-color"]').content=state.theme==='pink'?'#fff0f6':'#080a12';
+}
 function connect(room){const name=$('playerName').value.trim()||localStorage.getItem('facepong-name')||'Player';localStorage.setItem('facepong-name',name);if(state.ws)state.ws.close();const protocol=location.protocol==='https:'?'wss:':'ws:';state.ws=new WebSocket(`${protocol}//${location.host}/ws`);state.ws.onopen=()=>wsSend({type:'join',room,name});state.ws.onmessage=e=>{let msg;try{msg=JSON.parse(e.data);}catch{return;}onMessage(msg);};state.ws.onclose=()=>{for(const id of [...state.voicePeers.keys()])closeVoicePeer(id);toast('Connection lost. Refresh to reconnect.');$('trackingStatus').textContent='DISCONNECTED';};state.ws.onerror=()=>toast('Could not connect to game server');}
 function onMessage(msg){
  if(msg.type==='error'){toast(msg.message);return;}
@@ -25,7 +34,7 @@ function onMessage(msg){
  if(msg.type!=='state')return;
  const oldPhase=state.phase, oldHit=state.lastHit, oldRound=state.lastRound;
  state.players=msg.players;state.size=msg.size;state.ballSpeed=msg.ballSpeed??1;state.headSpeed=msg.headSpeed??1;state.phase=msg.phase;state.mode=msg.mode||'points';state.targetPoints=msg.targetPoints||7;state.durationMinutes=msg.durationMinutes||2;state.countdownAt=msg.countdownAt||0;state.matchEndsAt=msg.matchEndsAt||0;state.score=msg.score;state.ball=msg.ball;state.lastHit=msg.lastHit;state.lastRound=msg.round;state.host=msg.players[0]?.id===state.id;state.ready=!!me()?.ready;state.music=msg.music||null;
- setTheme();renderSpeedControls();syncVoicePeers();renderVoiceUI();renderMusicUI();
+ setTheme();renderSpeedControls();syncVoicePeers();if(state.voiceEnabled||!(/Microphone blocked|Microphone unavailable|Microphone could not|No microphone found|Browser blocked/.test($('voiceStatus').textContent)))renderVoiceUI();renderMusicUI();
  if(oldHit!==state.lastHit&&state.lastHit){registerHit(state.lastHit);}
  if(oldPhase!==state.phase){
   if(state.phase==='playing'){startMatchRecording();toast('THE MATCH IS ON!');}
@@ -119,7 +128,7 @@ function createCollage(shots){
  const cols=Math.min(4,shots.length),rows=Math.ceil(shots.length/cols),size=180;
  const c=document.createElement('canvas');c.width=cols*size;c.height=rows*size+50;const x=c.getContext('2d');
  x.fillStyle=state.theme==='pink'?'#180912':'#081019';x.fillRect(0,0,c.width,c.height);
- x.fillStyle='#fff';x.font='bold 24px sans-serif';x.fillText('FACE PONG HIGHLIGHTS',18,32);
+ x.fillStyle='#fff';x.font='bold 24px sans-serif';x.fillText('BALLFACE HIGHLIGHTS',18,32);
  shots.forEach((shot,i)=>{
   const col=i%cols,row=Math.floor(i/cols),px=col*size,py=row*size+50;
   const img=new Image();img.onload=()=>{x.drawImage(img,px+6,py+6,size-12,size-12);x.strokeStyle=shot.team===1?'#ff6fae':'#6ae6f5';x.lineWidth=4;x.strokeRect(px+6,py+6,size-12,size-12);x.fillStyle='rgba(0,0,0,.6)';x.fillRect(px+6,py+size-39,size-12,27);x.fillStyle='#fff';x.font='600 15px sans-serif';x.fillText(shot.name,px+14,py+size-18);const a=$('downloadCollage');a.href=c.toDataURL('image/png');a.classList.remove('hidden');};img.src=shot.src;
@@ -143,15 +152,42 @@ for(const [id,key] of [['ballSpeed','ballSpeed'],['headSpeed','headSpeed'],['gam
 // WebRTC voice is opt-in and local microphone capture is separate from replay consent.
 const ICE_SERVERS={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
 function voiceSend(){wsSend({type:'voice-status',enabled:state.voiceEnabled,muted:state.voiceMuted});}
+function voicePermissionMessage(error){
+ const name=error?.name||'UnknownError';
+ if(name==='NotAllowedError'||name==='PermissionDeniedError') return 'Microphone blocked. In browser site settings, allow Microphone for this game, then refresh and retry.';
+ if(name==='NotFoundError'||name==='DevicesNotFoundError') return 'No microphone found on this device.';
+ if(name==='NotReadableError'||name==='TrackStartError') return 'Microphone unavailable or in use by another app. Close other apps and retry.';
+ if(name==='SecurityError') return 'Browser blocked the microphone. Open the HTTPS game link in Safari or Chrome directly.';
+ return `Microphone could not start (${name}). Check browser microphone permissions and retry.`;
+}
 async function joinVoice(){
- if(state.voiceEnabled){return;}
- if(!navigator.mediaDevices?.getUserMedia){toast('Voice requires HTTPS and microphone access.');return;}
+ if(state.voiceEnabled)return;
+ const status=$('voiceStatus'),gameStatus=$('gameVoiceStatus');
+ if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia){
+  const msg='Microphone requires a secure HTTPS page opened directly in Safari or Chrome.';
+  status.textContent=msg;gameStatus.textContent=msg;toast(msg);return;
+ }
+ const buttons=['joinVoice','gameJoinVoice'].map($).filter(Boolean);
+ buttons.forEach(b=>{b.disabled=true;b.textContent='🎙 REQUESTING MIC…';});
+ status.textContent='REQUESTING MICROPHONE PERMISSION…';gameStatus.textContent='REQUESTING MICROPHONE PERMISSION…';
  try{
-  state.voiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+  // Run directly from Join Voice tap, requesting broad audio compatibility first.
+  const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});
+  if(!stream.getAudioTracks().length)throw new Error('No microphone track returned');
+  state.voiceStream=stream;
+  for(const track of stream.getAudioTracks()){
+   track.applyConstraints?.({echoCancellation:true,noiseSuppression:true,autoGainControl:true}).catch(()=>{});
+   track.enabled=true;
+  }
   state.voiceEnabled=true;state.voiceMuted=false;
-  state.voiceStream.getAudioTracks().forEach(t=>t.enabled=true);
-  voiceSend();renderVoiceUI();toast('Voice connected. Tap mute anytime.');
- }catch(e){console.warn('Voice microphone error',e);toast('Microphone permission is needed for voice chat.');}
+  voiceSend();syncVoicePeers();renderVoiceUI();toast('Microphone enabled. Voice chat connected. Tap Mute anytime.');
+ }catch(error){
+  console.error('Voice microphone request failed:',error);
+  state.voiceEnabled=false;
+  const msg=voicePermissionMessage(error);
+  status.textContent=msg;gameStatus.textContent=msg;toast(msg);
+  buttons.forEach(b=>{b.disabled=false;b.textContent='🎙 RETRY MICROPHONE';});
+ }
 }
 function toggleMute(){if(!state.voiceEnabled)return;state.voiceMuted=!state.voiceMuted;for(const t of state.voiceStream?.getAudioTracks()||[])t.enabled=!state.voiceMuted;voiceSend();renderVoiceUI();}
 function renderVoiceUI(){const connected=state.voiceEnabled;const label=connected?(state.voiceMuted?'🔇 UNMUTE':'🎙 MUTE'):'🎙 JOIN VOICE CHAT';
@@ -231,5 +267,5 @@ $('joinVoice').onclick=joinVoice;$('gameJoinVoice').onclick=joinVoice;$('muteVoi
  catch(err){toast('Music upload failed: '+String(err.message||err).slice(0,100));}
  finally{button.textContent='UPLOAD TO ROOM';button.disabled=!state.host;}
 };$('removeMusic').onclick=()=>wsSend({type:'music',action:'clear'});$('toggleMusic').onclick=()=>{state.musicVisible=!state.musicVisible;renderMusicUI();};$('gameMusicToggle').onclick=()=>{state.musicVisible=!state.musicVisible;renderMusicUI();};$('copyLink').onclick=async()=>{try{await navigator.clipboard.writeText(location.href);toast('Invite link copied!');}catch{prompt('Copy this invite link:',location.href);}};
-document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>wsSend({type:'size',size:Number(b.dataset.size)})); document.querySelectorAll('[data-team]').forEach(b=>b.onclick=()=>wsSend({type:'team',team:Number(b.dataset.team)})); $('readyBtn').onclick=()=>wsSend({type:'ready',ready:!state.ready}); $('startBtn').onclick=()=>wsSend({type:'start'}); $('rematchBtn').onclick=()=>{clearReplayDownloads(); wsSend({type:'rematch'});}; $('enableCamera').onclick=startCamera; $('lobbyEnableCamera').onclick=startCamera; $('fillBots').onclick=()=>wsSend({type:'bots',action:'fill'}); $('clearBots').onclick=()=>wsSend({type:'bots',action:'clear'}); $('calibrateBtn').onclick=()=>{state.neutral=null;toast('Face calibration reset. Look straight ahead.');}; $('modeBtn').onclick=()=>{state.track=state.track==='tilt'?'translation':'tilt';state.neutral=null;$('modeBtn').textContent=state.track==='tilt'?'MODE: ALL HEAD MOVEMENTS':'MODE: HEAD POSITION + LOOK';toast(`Control mode: ${state.track}`);}; for(const id of ['matchMode','targetPoints','durationMinutes']) $(id).addEventListener('change',()=>{if(!state.host)return; wsSend({type:'rules',mode:$('matchMode').value,targetPoints:Number($('targetPoints').value),durationMinutes:Number($('durationMinutes').value)});}); $('soundToggle').onclick=()=>{state.sound=!state.sound;$('soundToggle').textContent=state.sound?'♪':'♪̸';}; $('recordHighlights').addEventListener('change',e=>{state.recordHighlights=e.target.checked; $('recordMic').disabled=!state.recordHighlights; if(!state.recordHighlights){state.recordMic=false; $('recordMic').checked=false; clearReplayDownloads();}}); $('recordMic').addEventListener('change',e=>{state.recordMic=e.target.checked;}); setInterval(()=>{if(state.phase==='countdown'||state.phase==='playing'&&state.mode==='timed')renderGameUI();},250);
-const initialRoom=roomFromURL(); if(initialRoom){$('joinCode').value=initialRoom;$('joinForm').classList.remove('hidden');$('joinBtn').textContent='INVITE LINK DETECTED';} document.body.classList.add('theme-blue'); requestAnimationFrame(draw);
+document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>wsSend({type:'size',size:Number(b.dataset.size)})); document.querySelectorAll('[data-team]').forEach(b=>b.onclick=()=>wsSend({type:'team',team:Number(b.dataset.team)})); $('readyBtn').onclick=()=>wsSend({type:'ready',ready:!state.ready}); $('startBtn').onclick=()=>wsSend({type:'start'}); $('rematchBtn').onclick=()=>{clearReplayDownloads(); wsSend({type:'rematch'});}; $('enableCamera').onclick=startCamera; $('lobbyEnableCamera').onclick=startCamera; $('fillBots').onclick=()=>wsSend({type:'bots',action:'fill'}); $('clearBots').onclick=()=>wsSend({type:'bots',action:'clear'}); $('calibrateBtn').onclick=()=>{state.neutral=null;toast('Face calibration reset. Look straight ahead.');}; $('modeBtn').onclick=()=>{state.track=state.track==='tilt'?'translation':'tilt';state.neutral=null;$('modeBtn').textContent=state.track==='tilt'?'MODE: ALL HEAD MOVEMENTS':'MODE: HEAD POSITION + LOOK';toast(`Control mode: ${state.track}`);}; for(const id of ['matchMode','targetPoints','durationMinutes']) $(id).addEventListener('change',()=>{if(!state.host)return; wsSend({type:'rules',mode:$('matchMode').value,targetPoints:Number($('targetPoints').value),durationMinutes:Number($('durationMinutes').value)});}); $('soundToggle').onclick=()=>{state.sound=!state.sound;$('soundToggle').textContent=state.sound?'♪':'♪̸';}; $('styleBoy').onclick=()=>{localStorage.setItem('facepong-style','blue');setTheme('blue');}; $('styleGirl').onclick=()=>{localStorage.setItem('facepong-style','pink');setTheme('pink');}; $('recordHighlights').addEventListener('change',e=>{state.recordHighlights=e.target.checked; $('recordMic').disabled=!state.recordHighlights; if(!state.recordHighlights){state.recordMic=false; $('recordMic').checked=false; clearReplayDownloads();}}); $('recordMic').addEventListener('change',e=>{state.recordMic=e.target.checked;}); setInterval(()=>{if(state.phase==='countdown'||state.phase==='playing'&&state.mode==='timed')renderGameUI();},250);
+const initialRoom=roomFromURL(); if(initialRoom){$('joinCode').value=initialRoom;$('joinForm').classList.remove('hidden');$('joinBtn').textContent='INVITE LINK DETECTED';} setTheme(); requestAnimationFrame(draw);
