@@ -60,3 +60,7 @@ Opt-in WebRTC voice, with participant mute/unmute and no automatic recording. Fo
 ## Microphone permission troubleshooting
 
 Use the **JOIN VOICE CHAT** button inside the HTTPS game page. It requests microphone access with `getUserMedia({ audio: true })` and displays a specific error if the browser cannot grant access. Camera permission does not grant microphone permission. If the prompt does not appear and the game says **Microphone blocked**, a previous denial may have been saved by the browser: change this site's microphone permission to **Allow** and reload. Open the full Render HTTPS URL directly in Chrome or Safari rather than inside another app's embedded browser. Joining voice is optional; players can remain muted or play with no mic. A secure microphone permission request cannot force the operating system to show a new prompt if access was already denied.
+
+
+## Static selfies and compact lobby
+The front-facing camera still powers MediaPipe head tracking. It is **not** streamed as a live avatar. On first successful tracking, the client takes a one-time still selfie; players may replace it with a new selfie or upload a JPG/PNG image (8 MB limit; resized to a 112px JPEG). Only this still image is sent to other clients. Uploaded photos do not replace live camera tracking for gameplay. Selfies are kept in room memory and sent to late joiners. The circular crop is **not** background segmentation: background inside the crop can still be visible. Match settings and party extras are collapsed by default.
