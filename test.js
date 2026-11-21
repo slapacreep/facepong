@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict');
-const {server,makeRoom,zone,playerRadius,tick}=require('./server');
+const {server,makeRoom,zone,playerRadius,tick,addBot,removeBots,updateBots,playerSummary}=require('./server');
 for(let n=1;n<=6;n++){
  const room=makeRoom('ABCDEF');room.size=n;
  for(let team=0;team<2;team++)for(let i=0;i<n;i++){
@@ -7,7 +7,19 @@ for(let n=1;n<=6;n++){
   assert(z.minX>=0&&z.maxX<=650&&z.maxY<=1000);
   assert(team===0?z.minY>500:z.maxY<500);
  }
- assert(playerRadius(room)>0&&playerRadius(room)<=43);
+ assert(playerRadius(room)>0&&playerRadius(room)<=52);
+}
+// 1v1 faces are exactly 20% bigger than the earlier 43px cap.
+const solo=makeRoom('SOLO1');solo.size=1;assert.equal(playerRadius(solo),51.6);
+for(let size=1;size<=6;size++){
+ const bots=makeRoom('BOTS1');bots.size=size;
+ for(let team=0;team<2;team++)for(let i=0;i<size;i++)assert(addBot(bots,team));
+ assert.equal(bots.players.length,size*2);
+ assert(bots.players.every(p=>p.bot&&p.ready&&playerSummary(p).bot));
+ assert.equal(addBot(bots,0),false);
+ bots.phase='playing';bots.serveAt=Date.now()+99999;const before=bots.players.map(p=>[p.x,p.y]);tick(bots,.05);
+ assert(bots.players.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)));
+ bots.phase='lobby';removeBots(bots);assert.equal(bots.players.length,0);
 }
 const adjustable=makeRoom('SPEED');assert.equal(adjustable.ballSpeed,1);assert.equal(adjustable.headSpeed,1);
 const duel=makeRoom('DUELS');duel.size=1;assert(playerRadius(duel)>playerRadius(makeRoom('ABCDEF')));
