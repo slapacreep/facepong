@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict');
-const {server,makeRoom,zone,playerRadius,tick,addBot,removeBots,updateBots,playerSummary}=require('./server');
+const {server,makeRoom,zone,playerRadius,tick,addBot,removeBots,updateBots,playerSummary,roundSpeed}=require('./server');
 for(let n=1;n<=6;n++){
  const room=makeRoom('ABCDEF');room.size=n;
  for(let team=0;team<2;team++)for(let i=0;i<n;i++){
@@ -21,6 +21,7 @@ for(let size=1;size<=6;size++){
  assert(bots.players.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)));
  bots.phase='lobby';removeBots(bots);assert.equal(bots.players.length,0);
 }
+const rounds=makeRoom('ROUNDS');assert.equal(roundSpeed(rounds),1);rounds.round=2;assert.equal(roundSpeed(rounds),1.1);rounds.round=12;assert.equal(roundSpeed(rounds),1.8);
 const adjustable=makeRoom('SPEED');assert.equal(adjustable.ballSpeed,1);assert.equal(adjustable.headSpeed,1);
 const duel=makeRoom('DUELS');duel.size=1;assert(playerRadius(duel)>playerRadius(makeRoom('ABCDEF')));
 const duelZone=zone(duel,{team:0,slot:0});assert(duelZone.maxX-duelZone.minX>500);

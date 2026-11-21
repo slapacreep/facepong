@@ -58,7 +58,8 @@ function upgrade(req,socket){const key=req.headers['sec-websocket-key'];if(req.h
 function makeRoom(id){return {id,players:[],size:2,ballSpeed:1,headSpeed:1,phase:'lobby',mode:'points',targetPoints:7,durationMinutes:2,countdownAt:0,matchEndsAt:0,score:[0,0],ball:{x:WIDTH/2,y:HEIGHT/2,vx:0,vy:0},lastHit:null,serveAt:0,round:0,gameOver:false,music:null,created:Date.now()};}
 function safeRoom(id){return typeof id==='string'&&/^[A-Z2-9]{5,7}$/.test(id);}
 function playerSummary(p){return {id:p.id,name:p.name,team:p.team,slot:p.slot,x:p.x,y:p.y,ready:p.ready,tracking:p.tracking,cameraReady:!!p.cameraReady,bot:!!p.bot,voiceEnabled:!!p.voiceEnabled,muted:!!p.muted};}
-function snapshot(r){return {type:'state',room:r.id,phase:r.phase,size:r.size,ballSpeed:r.ballSpeed,headSpeed:r.headSpeed,players:r.players.map(playerSummary),score:r.score,ball:r.ball,round:r.round,lastHit:r.lastHit,gameOver:r.gameOver,mode:r.mode,targetPoints:r.targetPoints,durationMinutes:r.durationMinutes,countdownAt:r.countdownAt,matchEndsAt:r.matchEndsAt,music:r.music};}
+function roundSpeed(r){return Math.min(1.8,1+Math.max(0,r.round-1)*0.1);}
+function snapshot(r){return {type:'state',room:r.id,phase:r.phase,size:r.size,ballSpeed:r.ballSpeed,headSpeed:r.headSpeed,players:r.players.map(playerSummary),score:r.score,ball:r.ball,round:r.round,roundSpeed:roundSpeed(r),lastHit:r.lastHit,gameOver:r.gameOver,mode:r.mode,targetPoints:r.targetPoints,durationMinutes:r.durationMinutes,countdownAt:r.countdownAt,matchEndsAt:r.matchEndsAt,music:r.music};}
 function rearrange(r){for(let team=0;team<2;team++){const players=r.players.filter(p=>p.team===team);players.forEach((p,i)=>{p.slot=i;const range=zone(r,p);p.x=Math.max(range.minX,Math.min(range.maxX,p.x??(range.minX+range.maxX)/2));p.y=(range.minY+range.maxY)/2;});}}
 function zone(r,p){
  const n=r.size,slot=Math.min(p.slot,n-1),lane=WIDTH/n;
@@ -153,7 +154,7 @@ function tick(r,dt){const now=Date.now();
  if(r.phase==='countdown'){if(!r.players.every(p=>p.bot||p.cameraReady)){r.phase='lobby';r.countdownAt=0;return;}if(now>=r.countdownAt){r.phase='playing';r.matchEndsAt=r.mode==='timed'?now+r.durationMinutes*60000:0;r.serveAt=now+450;}else return;}
  if(r.phase!=='playing')return;
  if(r.mode==='timed'&&r.matchEndsAt&&now>=r.matchEndsAt){r.phase='finished';r.gameOver=true;r.ball.vx=0;r.ball.vy=0;return;}
-updateBots(r,dt);for(const p of r.players){if(now-p.lastMove>110){p.vx=0;p.vy=0;}}const b=r.ball;if(r.serveAt){if(Date.now()<r.serveAt)return;r.serveAt=0;const dir=Math.random()<.5?-1:1;b.vy=dir*310*r.ballSpeed;b.vx=(Math.random()-.5)*270*r.ballSpeed;}
+updateBots(r,dt);for(const p of r.players){if(now-p.lastMove>110){p.vx=0;p.vy=0;}}const b=r.ball;if(r.serveAt){if(Date.now()<r.serveAt)return;r.serveAt=0;const dir=Math.random()<.5?-1:1;b.vy=dir*310*r.ballSpeed*roundSpeed(r);b.vx=(Math.random()-.5)*270*r.ballSpeed*roundSpeed(r);}
  const substeps=3,step=dt/substeps,pr=playerRadius(r);for(let n=0;n<substeps;n++){
  b.x+=b.vx*step;b.y+=b.vy*step;
  // Left/right are solid side walls; top/bottom are the scoring goal lines.
@@ -163,7 +164,7 @@ updateBots(r,dt);for(const p of r.players){if(now-p.lastMove>110){p.vx=0;p.vy=0;
  for(const p of r.players){const dist=Math.hypot(b.x-p.x,b.y-p.y),minDist=pr+RADIUS;if(dist>=minDist||dist<.01||r.lastHit===p.id)continue;
  const nx=(b.x-p.x)/dist,ny=(b.y-p.y)/dist,relative=(b.vx-p.vx)*nx+(b.vy-p.vy)*ny;if(relative>=0)continue;
  b.x=p.x+nx*(minDist+.8);b.y=p.y+ny*(minDist+.8);
- const incoming=Math.hypot(b.vx,b.vy);const swing=Math.max(0,p.vx*nx+p.vy*ny);const speed=Math.min(1150*r.ballSpeed,Math.max(220*r.ballSpeed,incoming*.9+swing*.48*r.ballSpeed+70*r.ballSpeed));
+ const incoming=Math.hypot(b.vx,b.vy);const swing=Math.max(0,p.vx*nx+p.vy*ny);const speed=Math.min(1150*r.ballSpeed*roundSpeed(r),Math.max(220*r.ballSpeed*roundSpeed(r),incoming*.9+swing*.48*r.ballSpeed*roundSpeed(r)+70*r.ballSpeed*roundSpeed(r)));
  const impulseX=nx*speed+p.vx*.12,impulseY=ny*speed+p.vy*.12;const magnitude=Math.hypot(impulseX,impulseY)||1;b.vx=impulseX/magnitude*speed;b.vy=impulseY/magnitude*speed;
  // Return shots toward opponent more consistently; still permits angled teammate passes.
  if(p.team===0&&b.vy>-85)b.vy=-Math.max(85,Math.abs(b.vy)*.6);
@@ -180,4 +181,4 @@ server.on('upgrade',(req,socket)=>{if(new URL(req.url,'http://localhost').pathna
 setInterval(()=>{for(const r of rooms.values()){tick(r,.05);if(r.phase==='playing'||r.phase==='finished'||r.phase==='countdown')broadcast(r,snapshot(r));}},50);
 setInterval(()=>{for(const [id,r] of rooms)if(!r.players.length||Date.now()-r.created>1000*60*60*12){rooms.delete(id);musicFiles.delete(id);}},60000);
 if(require.main===module)server.listen(PORT,'0.0.0.0',()=>console.log(`BALLFACE listening on http://localhost:${PORT}`));
-module.exports={server,rooms,zone,playerRadius,makeRoom,tick,addBot,removeBots,updateBots,playerSummary};
+module.exports={server,rooms,zone,playerRadius,makeRoom,tick,addBot,removeBots,updateBots,playerSummary,roundSpeed};
