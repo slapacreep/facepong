@@ -8,6 +8,43 @@ const ROOT = path.join(__dirname, 'public');
 const ORIGIN = process.env.PUBLIC_ORIGIN || '';
 const rooms = new Map();
 const WIDTH=650, HEIGHT=1000, RADIUS=8, TICK=1000/30;
+const MAX_MUSIC_BYTES=12*1024*1024;
+const MUSIC_TYPES={'audio/mpeg':'mp3','audio/mp3':'mp3','video/mp4':'mp4','audio/mp4':'mp4'};
+const musicFiles=new Map();
+function musicResponse(req,res,pathname){
+ const m=/^\/api\/room-music\/([A-Z2-9]{5,7})\/([a-f0-9]{16})$/.exec(pathname);if(!m)return false;
+ const item=musicFiles.get(m[1]);if(!item||item.token!==m[2]){res.writeHead(404).end('Song not found');return true;}
+ const size=item.buffer.length;let start=0,end=size-1,status=200;
+ if(req.headers.range){const match=/^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+ if(!match){res.writeHead(416,{'Content-Range':`bytes */${size}`}).end();return true;}
+ if(match[1]===''&&match[2]!==''){start=Math.max(0,size-Number(match[2]));}
+ else{start=Number(match[1]);end=match[2]?Number(match[2]):size-1;}
+ if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||start>=size||end<start){res.writeHead(416,{'Content-Range':`bytes */${size}`}).end();return true;}
+ end=Math.min(end,size-1);status=206;
+ }
+ res.writeHead(status,{'Content-Type':item.type,'Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':'no-store',...(status===206?{'Content-Range':`bytes ${start}-${end}/${size}`}:{})});
+ if(req.method==='HEAD')res.end();else res.end(item.buffer.subarray(start,end+1));return true;
+}
+function uploadMusic(req,res,url){
+ const roomId=url.searchParams.get('room')||'',playerId=req.headers['x-facepong-player-id'];const room=rooms.get(roomId);
+ if(!room||room.players[0]?.id!==playerId||room.players[0]?.bot){res.writeHead(403).end('Only the lobby host can upload music');return;}
+ const type=String(req.headers['content-type']||'').split(';')[0].trim().toLowerCase();
+ const length=Number(req.headers['content-length']);
+ if(!MUSIC_TYPES[type]||!Number.isInteger(length)||length<128||length>MAX_MUSIC_BYTES){res.writeHead(413).end('Use an MP3 or MP4 under 12 MB');return;}
+ const chunks=[];let total=0,finished=false;
+ req.on('data',chunk=>{total+=chunk.length;if(total>MAX_MUSIC_BYTES||total>length){finished=true;res.writeHead(413).end('File too large');req.destroy();return;}chunks.push(chunk);});
+ req.on('end',()=>{if(finished)return;if(total!==length){res.writeHead(400).end('Incomplete upload');return;}
+ // Limit temporary total shared memory to avoid unlimited uploads across many rooms.
+ const totalStored=[...musicFiles.values()].reduce((a,b)=>a+b.buffer.length,0)-(musicFiles.get(roomId)?.buffer.length||0);
+ if(totalStored+total>96*1024*1024){res.writeHead(503).end('Music storage temporarily full');return;}
+ const token=crypto.randomBytes(8).toString('hex');const name=String(req.headers['x-facepong-filename']||'Uploaded song').replace(/[^\w. ()-]/g,'').slice(0,70)||'Uploaded song';
+ musicFiles.set(roomId,{buffer:Buffer.concat(chunks),token,type});
+ room.music={type:'upload',url:`/api/room-music/${roomId}/${token}`,name,by:room.players[0].name,at:Date.now()};broadcast(room,snapshot(room));
+ res.writeHead(201,{'Content-Type':'application/json','Cache-Control':'no-store'}).end(JSON.stringify({ok:true,name}));
+ });
+ req.on('error',()=>{if(!res.headersSent)res.writeHead(400).end('Upload interrupted');});
+}
+
 const MIME={'.html':'text/html; charset=utf-8','.js':'application/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon'};
 function broadcast(room,obj){const msg=JSON.stringify(obj);for(const p of room.players)if(p.socket&&!p.socket.destroyed)send(p.socket,msg);}
 function send(s,msg){if(s.destroyed)return;const data=Buffer.from(msg),length=data.length;let head;if(length<126){head=Buffer.from([129,length]);}else if(length<65536){head=Buffer.alloc(4);head[0]=129;head[1]=126;head.writeUInt16BE(length,2);}else{head=Buffer.alloc(10);head[0]=129;head[1]=127;head.writeBigUInt64BE(BigInt(length),2);}s.write(Buffer.concat([head,data]));}
@@ -18,10 +55,10 @@ function upgrade(req,socket){const key=req.headers['sec-websocket-key'];if(req.h
  socket.on('data',chunk=>{pending=Buffer.concat([pending,chunk]);while(pending.length>=2){const b=pending[1],masked=(b&128)!==0,opcode=pending[0]&15;let len=b&127,offset=2;if(len===126){if(pending.length<4)break;len=pending.readUInt16BE(2);offset=4;}else if(len===127){if(pending.length<10)break;const n=pending.readBigUInt64BE(2);if(n>65536n){socket.destroy();return;}len=Number(n);offset=10;}if(!masked||len>65536){socket.destroy();return;}if(pending.length<offset+4+len)break;const mask=pending.subarray(offset,offset+4),data=Buffer.from(pending.subarray(offset+4,offset+4+len));pending=pending.subarray(offset+4+len);for(let i=0;i<len;i++)data[i]^=mask[i%4];if(opcode===8){socket.end();return;}if(opcode===9){socket.write(Buffer.from([0x8a,0]));continue;}if(opcode===1){try{const msg=JSON.parse(data.toString('utf8'));current=onMessage(socket,current,msg);}catch(e){send(socket,JSON.stringify({type:'error',message:'Invalid message'}));}}}});
  socket.on('close',()=>leave(socket,current));socket.on('error',()=>{});
 }
-function makeRoom(id){return {id,players:[],size:2,ballSpeed:1,headSpeed:1,phase:'lobby',mode:'points',targetPoints:7,durationMinutes:2,countdownAt:0,matchEndsAt:0,score:[0,0],ball:{x:WIDTH/2,y:HEIGHT/2,vx:0,vy:0},lastHit:null,serveAt:0,round:0,gameOver:false,created:Date.now()};}
+function makeRoom(id){return {id,players:[],size:2,ballSpeed:1,headSpeed:1,phase:'lobby',mode:'points',targetPoints:7,durationMinutes:2,countdownAt:0,matchEndsAt:0,score:[0,0],ball:{x:WIDTH/2,y:HEIGHT/2,vx:0,vy:0},lastHit:null,serveAt:0,round:0,gameOver:false,music:null,created:Date.now()};}
 function safeRoom(id){return typeof id==='string'&&/^[A-Z2-9]{5,7}$/.test(id);}
-function playerSummary(p){return {id:p.id,name:p.name,team:p.team,slot:p.slot,x:p.x,y:p.y,ready:p.ready,tracking:p.tracking,cameraReady:!!p.cameraReady,bot:!!p.bot};}
-function snapshot(r){return {type:'state',room:r.id,phase:r.phase,size:r.size,ballSpeed:r.ballSpeed,headSpeed:r.headSpeed,players:r.players.map(playerSummary),score:r.score,ball:r.ball,round:r.round,lastHit:r.lastHit,gameOver:r.gameOver,mode:r.mode,targetPoints:r.targetPoints,durationMinutes:r.durationMinutes,countdownAt:r.countdownAt,matchEndsAt:r.matchEndsAt};}
+function playerSummary(p){return {id:p.id,name:p.name,team:p.team,slot:p.slot,x:p.x,y:p.y,ready:p.ready,tracking:p.tracking,cameraReady:!!p.cameraReady,bot:!!p.bot,voiceEnabled:!!p.voiceEnabled,muted:!!p.muted};}
+function snapshot(r){return {type:'state',room:r.id,phase:r.phase,size:r.size,ballSpeed:r.ballSpeed,headSpeed:r.headSpeed,players:r.players.map(playerSummary),score:r.score,ball:r.ball,round:r.round,lastHit:r.lastHit,gameOver:r.gameOver,mode:r.mode,targetPoints:r.targetPoints,durationMinutes:r.durationMinutes,countdownAt:r.countdownAt,matchEndsAt:r.matchEndsAt,music:r.music};}
 function rearrange(r){for(let team=0;team<2;team++){const players=r.players.filter(p=>p.team===team);players.forEach((p,i)=>{p.slot=i;const range=zone(r,p);p.x=Math.max(range.minX,Math.min(range.maxX,p.x??(range.minX+range.maxX)/2));p.y=(range.minY+range.maxY)/2;});}}
 function zone(r,p){
  const n=r.size,slot=Math.min(p.slot,n-1),lane=WIDTH/n;
@@ -59,8 +96,26 @@ function updateBots(r,dt){
 function chooseTeam(r){const c=[r.players.filter(p=>p.team===0).length,r.players.filter(p=>p.team===1).length];return c[0]<=c[1]?0:1;}
 function onMessage(socket,old,msg){if(!msg||typeof msg.type!=='string')return old;
  if(msg.type==='join'){if(old)return old;const id=String(msg.room||'').toUpperCase();if(!safeRoom(id)){send(socket,JSON.stringify({type:'error',message:'Invalid room code'}));return null;}let r=rooms.get(id);if(!r){r=makeRoom(id);rooms.set(id,r);}if(r.phase!=='lobby'){send(socket,JSON.stringify({type:'error',message:'Match already started. Join after the rematch.'}));return null;}if(r.players.length>=r.size*2){const bot=r.players.find(p=>p.bot);if(bot){r.players=r.players.filter(p=>p!==bot);}else{send(socket,JSON.stringify({type:'error',message:'Lobby is full'}));return null;}}
- const name=String(msg.name||'Player').trim().slice(0,18).replace(/[<>]/g,'')||'Player';const p={id:crypto.randomUUID(),name,team:chooseTeam(r),slot:0,x:null,y:null,ready:false,tracking:false,cameraReady:false,socket,lastX:0,lastY:0,vx:0,vy:0,lastMove:Date.now()};r.players.push(p);rearrange(r);send(socket,JSON.stringify({type:'welcome',id:p.id,room:id}));broadcast(r,snapshot(r));return {room:id,player:p.id};}
+ const name=String(msg.name||'Player').trim().slice(0,18).replace(/[<>]/g,'')||'Player';const p={id:crypto.randomUUID(),name,team:chooseTeam(r),slot:0,x:null,y:null,ready:false,tracking:false,cameraReady:false,socket,voiceEnabled:false,muted:true,lastX:0,lastY:0,vx:0,vy:0,lastMove:Date.now()};r.players.push(p);rearrange(r);send(socket,JSON.stringify({type:'welcome',id:p.id,room:id}));broadcast(r,snapshot(r));return {room:id,player:p.id};}
  if(!old)return old;const r=rooms.get(old.room),p=r?.players.find(p=>p.id===old.player);if(!r||!p)return old;
+ if(msg.type==='voice-status'){p.voiceEnabled=msg.enabled===true;p.muted=msg.muted!==false;broadcast(r,snapshot(r));}
+ if(msg.type==='signal' && ['offer','answer','ice'].includes(msg.kind) && typeof msg.to==='string'){
+  const target=r.players.find(q=>q.id===msg.to&&!q.bot&&q.socket&&q.voiceEnabled);
+  if(target&&p.voiceEnabled){
+   const data=JSON.stringify(msg.data||{});
+   if(data.length<24000)send(target.socket,JSON.stringify({type:'signal',from:p.id,kind:msg.kind,data:msg.data}));
+  }
+ }
+ if(msg.type==='music'&&r.players[0]===p){
+  if(msg.action==='clear'){r.music=null;musicFiles.delete(r.id);broadcast(r,snapshot(r));}
+  else if(msg.action==='set'&&typeof msg.url==='string'&&msg.url.length<600){
+   try{const u=new URL(msg.url);const host=u.hostname.toLowerCase();
+    if(u.protocol==='https:' && (['youtube.com','www.youtube.com','youtu.be','music.youtube.com','open.spotify.com','music.apple.com'].includes(host))){
+     r.music={url:u.href,by:p.name,at:Date.now()};broadcast(r,snapshot(r));
+    }else send(socket,JSON.stringify({type:'error',message:'Use a YouTube, Spotify, or Apple Music link.'}));
+   }catch{send(socket,JSON.stringify({type:'error',message:'Invalid music URL.'}));}
+  }
+ }
  if(msg.type==='size'&&r.phase==='lobby'&&r.players[0]===p){const size=Number(msg.size);if(Number.isInteger(size)&&size>=1&&size<=6&&r.players.length<=size*2){r.size=size;rearrange(r);broadcast(r,snapshot(r));}}
  if(msg.type==='rules'&&r.phase==='lobby'&&r.players[0]===p){
   if(msg.mode==='points'&&Number.isInteger(Number(msg.targetPoints))&&Number(msg.targetPoints)>=1&&Number(msg.targetPoints)<=50){r.mode='points';r.targetPoints=Number(msg.targetPoints);}
@@ -92,7 +147,7 @@ function onMessage(socket,old,msg){if(!msg||typeof msg.type!=='string')return ol
  if(msg.type==='move'&&['playing','countdown'].includes(r.phase)){const now=Date.now(),dt=Math.max(.02,Math.min(.2,(now-p.lastMove)/1000));const z=zone(r,p);const targetX=z.minX+(Math.max(0,Math.min(1,Number(msg.x)||0)))*(z.maxX-z.minX);const targetY=z.minY+(Math.max(0,Math.min(1,Number(msg.y)||0)))*(z.maxY-z.minY);const maxStep=2600*r.headSpeed*dt;const dx=Math.max(-maxStep,Math.min(maxStep,targetX-p.x)),dy=Math.max(-maxStep,Math.min(maxStep,targetY-p.y));p.vx=dx/dt;p.vy=dy/dt;p.x+=dx;p.y+=dy;p.lastMove=now;p.tracking=!!msg.tracking;}
  return old;
 }
-function leave(socket,session){if(!session)return;const r=rooms.get(session.room);if(!r)return;r.players=r.players.filter(p=>p.id!==session.player);if(!r.players.length){rooms.delete(r.id);return;}if(['playing','countdown'].includes(r.phase)){r.phase='lobby';r.countdownAt=0;r.players.forEach(p=>p.ready=false);resetBall(r);}rearrange(r);broadcast(r,snapshot(r));}
+function leave(socket,session){if(!session)return;const r=rooms.get(session.room);if(!r)return;r.players=r.players.filter(p=>p.id!==session.player);if(!r.players.length){rooms.delete(r.id);musicFiles.delete(r.id);return;}if(['playing','countdown'].includes(r.phase)){r.phase='lobby';r.countdownAt=0;r.players.forEach(p=>p.ready=false);resetBall(r);}rearrange(r);broadcast(r,snapshot(r));}
 function resetBall(r){r.ball={x:WIDTH/2,y:HEIGHT/2,vx:0,vy:0};r.lastHit=null;r.serveAt=Date.now()+1400;r.round++;}
 function tick(r,dt){const now=Date.now();
  if(r.phase==='countdown'){if(!r.players.every(p=>p.bot||p.cameraReady)){r.phase='lobby';r.countdownAt=0;return;}if(now>=r.countdownAt){r.phase='playing';r.matchEndsAt=r.mode==='timed'?now+r.durationMinutes*60000:0;r.serveAt=now+450;}else return;}
@@ -120,9 +175,9 @@ updateBots(r,dt);for(const p of r.players){if(now-p.lastMove>110){p.vx=0;p.vy=0;
  if(b.y+RADIUS<0 || b.y-RADIUS>HEIGHT){const scoring=b.y+RADIUS<0?0:1;r.score[scoring]++;if(r.mode==='points'&&r.score[scoring]>=r.targetPoints){r.phase='finished';r.gameOver=true;r.ball.vx=0;r.ball.vy=0;}else resetBall(r);break;}
  }
 }
-const server=http.createServer((req,res)=>{let p;try{p=decodeURIComponent(new URL(req.url,'http://localhost').pathname);}catch{res.writeHead(400).end();return;}if(p==='/health'){res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({ok:true,rooms:rooms.size}));return;}if(p==='/config'){res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({origin:ORIGIN}));return;}p=path.normalize(p).replace(/^([/\\]*\.\.[/\\])+/, '');if(p==='/'||!path.extname(p))p='/index.html';const full=path.resolve(ROOT,'.'+p);if(!full.startsWith(ROOT+path.sep)){res.writeHead(403).end();return;}fs.readFile(full,(err,data)=>{if(err){res.writeHead(404).end('Not found');return;}res.writeHead(200,{'Content-Type':MIME[path.extname(full)]||'application/octet-stream','Cache-Control':'no-cache'}).end(data);});});
+const server=http.createServer((req,res)=>{let p;try{p=decodeURIComponent(new URL(req.url,'http://localhost').pathname);}catch{res.writeHead(400).end();return;}if(p.startsWith('/api/room-music/')){if(req.method==='GET'||req.method==='HEAD')musicResponse(req,res,p);else res.writeHead(405).end();return;}if(p==='/api/upload-music'){if(req.method==='POST')uploadMusic(req,res,new URL(req.url,'http://localhost'));else res.writeHead(405).end();return;}if(p==='/health'){res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({ok:true,rooms:rooms.size}));return;}if(p==='/config'){res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({origin:ORIGIN}));return;}p=path.normalize(p).replace(/^([/\\]*\.\.[/\\])+/, '');if(p==='/'||!path.extname(p))p='/index.html';const full=path.resolve(ROOT,'.'+p);if(!full.startsWith(ROOT+path.sep)){res.writeHead(403).end();return;}fs.readFile(full,(err,data)=>{if(err){res.writeHead(404).end('Not found');return;}res.writeHead(200,{'Content-Type':MIME[path.extname(full)]||'application/octet-stream','Cache-Control':'no-cache'}).end(data);});});
 server.on('upgrade',(req,socket)=>{if(new URL(req.url,'http://localhost').pathname==='/ws')upgrade(req,socket);else socket.destroy();});
 setInterval(()=>{for(const r of rooms.values()){tick(r,.05);if(r.phase==='playing'||r.phase==='finished'||r.phase==='countdown')broadcast(r,snapshot(r));}},50);
-setInterval(()=>{for(const [id,r] of rooms)if(!r.players.length||Date.now()-r.created>1000*60*60*12)rooms.delete(id);},60000);
+setInterval(()=>{for(const [id,r] of rooms)if(!r.players.length||Date.now()-r.created>1000*60*60*12){rooms.delete(id);musicFiles.delete(id);}},60000);
 if(require.main===module)server.listen(PORT,'0.0.0.0',()=>console.log(`FACE PONG listening on http://localhost:${PORT}`));
 module.exports={server,rooms,zone,playerRadius,makeRoom,tick,addBot,removeBots,updateBots,playerSummary};

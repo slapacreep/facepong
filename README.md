@@ -36,3 +36,23 @@ Run `npm test` for server physics, bots, modes, camera gate, countdown and WebSo
 ## Limitations
 
 Face avatars are circular webcam crops, not fully rigged 3D characters. Lobbies are in-memory, so a server restart clears them. One frame of lost face detection can revoke lobby readiness; if tracking is unstable, improve lighting and keep your face visible. For real production use, add room persistence, reconnect handling, authentication, rate-limits and network prediction.
+
+
+## Live voice and shared music
+
+- Voice is **opt in** in lobby or game. Each player can mute/unmute. Browser permission is requested separately from camera. Audio is transmitted peer-to-peer using WebRTC (STUN only). No voice audio is intentionally relayed through the game server. Browser autoplay policies may require a tap to hear peers. For consistently reliable 6v6 voice, provision TURN or an SFU before production.
+- The room host can share a supported HTTPS YouTube, Spotify or Apple Music URL. Each player uses the service's official embed and chooses whether to press Play. This is not synchronized playback or rebroadcast: browser autoplay limits, ads, login, licensing, and preview-only playback may apply. Music is not included in highlight captures.
+- The existing highlight microphone permission is separate from live voice chat consent.
+
+## Shared room music (prototype)
+
+- The host can upload an MP3 or MP4 (maximum **12 MB** per file), or share a YouTube, Spotify, or Apple Music URL.
+- Uploaded music is temporarily held **in server memory** and served to that room with HTTP byte-range support. It is not written to disk; restarting or sleeping the Render instance clears it. Room cleanup also clears music.
+- Every player's phone receives the same track link and can tap **Play**, pause and change volume locally, in lobby or during the match. **Playback is not sample-synchronized between phones** and browsers require a user gesture to start music. MP4 audio playback depends on the browser's codecs.
+- Use headphones with voice chat to prevent echo. Microphone mute and music volume are independent.
+- Upload music only when you have permission to share it. The current host-selected upload is accessible to anyone with the active room's track URL; this is not protected licensed music distribution infrastructure.
+- Uploaded file requests are limited to 12 MB; shared upload memory is capped at 96 MB across rooms, appropriate for small prototypes but not a production music platform.
+
+## Live voice chat
+
+Opt-in WebRTC voice, with participant mute/unmute and no automatic recording. For reliable connectivity across all networks and at 6v6 scale, configure a TURN server or use an SFU; the present direct peer-to-peer implementation is primarily for testing.
