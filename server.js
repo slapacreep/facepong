@@ -123,10 +123,6 @@ function onMessage(socket,old,msg){if(!msg||typeof msg.type!=='string')return ol
   if(msg.mode==='timed'&&[2,5,10].includes(Number(msg.durationMinutes))){r.mode='timed';r.durationMinutes=Number(msg.durationMinutes);}
   broadcast(r,snapshot(r));
  }
- if(msg.type==='camera'){p.cameraReady=!!msg.ready&&!p.bot;p.tracking=p.cameraReady;if(!p.cameraReady)p.ready=false;
-  if(r.phase==='countdown'&&!r.players.every(q=>q.bot||q.cameraReady)){r.phase='lobby';r.countdownAt=0;r.players.forEach(q=>q.ready=false);broadcast(r,{type:'error',message:'Countdown cancelled: someone lost camera tracking.'});}
-  broadcast(r,snapshot(r));
- }
  if(msg.type==='bots'&&r.phase==='lobby'&&r.players[0]===p){
   if(msg.action==='fill'){for(let team=0;team<2;team++){while(r.players.filter(q=>q.team===team).length<r.size)addBot(r,team);}}
   else if(msg.action==='clear'){removeBots(r);}
@@ -141,10 +137,10 @@ function onMessage(socket,old,msg){if(!msg||typeof msg.type!=='string')return ol
   }
  }
  if(msg.type==='team'&&r.phase==='lobby'){const dest=Number(msg.team);if((dest===0||dest===1)&&r.players.filter(q=>q.team===dest).length<r.size){p.team=dest;rearrange(r);broadcast(r,snapshot(r));}}
- if(msg.type==='ready'&&r.phase==='lobby'){if(msg.ready&&!p.cameraReady){send(socket,JSON.stringify({type:'error',message:'Enable your camera and wait for face tracking before pressing Ready.'}));}else{p.ready=!!msg.ready;broadcast(r,snapshot(r));}}
- if(msg.type==='start'&&r.players[0]===p&&r.phase==='lobby'){const a=r.players.filter(p=>p.team===0).length,b=r.players.filter(p=>p.team===1).length;if(a!==r.size||b!==r.size){send(socket,JSON.stringify({type:'error',message:`Need ${r.size} players on each team to start.`}));}else if(!r.players.every(p=>p.ready)){send(socket,JSON.stringify({type:'error',message:'Everyone must press Ready.'}));}else if(!r.players.every(p=>p.bot||p.cameraReady)){send(socket,JSON.stringify({type:'error',message:'Every human player must enable their camera and have face tracking active.'}));}else{r.phase='countdown';r.countdownAt=Date.now()+4000;r.matchEndsAt=0;r.score=[0,0];r.gameOver=false;r.round=0;resetBall(r);broadcast(r,snapshot(r));}}
+ if(msg.type==='ready'&&r.phase==='lobby'){if(msg.ready&&!p.cameraReady){send(socket,JSON.stringify({type:'error',message:'Choose a photo before pressing Ready.'}));}else{p.ready=!!msg.ready;broadcast(r,snapshot(r));}}
+ if(msg.type==='start'&&r.players[0]===p&&r.phase==='lobby'){const a=r.players.filter(p=>p.team===0).length,b=r.players.filter(p=>p.team===1).length;if(a!==r.size||b!==r.size){send(socket,JSON.stringify({type:'error',message:`Need ${r.size} players on each team to start.`}));}else if(!r.players.every(p=>p.ready)){send(socket,JSON.stringify({type:'error',message:'Everyone must press Ready.'}));}else if(!r.players.every(p=>p.bot||p.cameraReady)){send(socket,JSON.stringify({type:'error',message:'Every human player must choose a photo before the match starts.'}));}else{r.phase='countdown';r.countdownAt=Date.now()+4000;r.matchEndsAt=0;r.score=[0,0];r.gameOver=false;r.round=0;resetBall(r);broadcast(r,snapshot(r));}}
  if(msg.type==='rematch'&&r.players[0]===p&&r.phase==='finished'){r.phase='lobby';r.score=[0,0];r.players.forEach(p=>p.ready=false);broadcast(r,snapshot(r));}
- if(msg.type==='face'&&typeof msg.image==='string'&&msg.image.length<35000&&/^data:image\/jpeg;base64,/.test(msg.image)){p.image=msg.image;broadcast(r,{type:'face',id:p.id,image:msg.image});}
+ if(msg.type==='face'&&r.phase==='lobby'&&typeof msg.image==='string'&&msg.image.length<65000&&/^data:image\/(?:jpeg|png);base64,/.test(msg.image)){p.image=msg.image;p.cameraReady=true;p.tracking=false;p.ready=false;broadcast(r,{type:'face',id:p.id,image:msg.image});broadcast(r,snapshot(r));}
  if(msg.type==='move'&&['playing','countdown'].includes(r.phase)){const now=Date.now(),dt=Math.max(.02,Math.min(.2,(now-p.lastMove)/1000));const z=zone(r,p);const targetX=z.minX+(Math.max(0,Math.min(1,Number(msg.x)||0)))*(z.maxX-z.minX);const targetY=z.minY+(Math.max(0,Math.min(1,Number(msg.y)||0)))*(z.maxY-z.minY);const maxStep=2600*r.headSpeed*dt;const dx=Math.max(-maxStep,Math.min(maxStep,targetX-p.x)),dy=Math.max(-maxStep,Math.min(maxStep,targetY-p.y));p.vx=dx/dt;p.vy=dy/dt;p.x+=dx;p.y+=dy;p.lastMove=now;p.tracking=!!msg.tracking;}
  return old;
 }

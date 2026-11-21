@@ -31,7 +31,7 @@ function setTheme(style){
 function connect(room){const name=$('playerName').value.trim()||localStorage.getItem('facepong-name')||'Player';localStorage.setItem('facepong-name',name);if(state.ws)state.ws.close();const protocol=location.protocol==='https:'?'wss:':'ws:';state.ws=new WebSocket(`${protocol}//${location.host}/ws`);state.ws.onopen=()=>wsSend({type:'join',room,name});state.ws.onmessage=e=>{let msg;try{msg=JSON.parse(e.data);}catch{return;}onMessage(msg);};state.ws.onclose=()=>{for(const id of [...state.voicePeers.keys()])closeVoicePeer(id);toast('Connection lost. Refresh to reconnect.');$('trackingStatus').textContent='DISCONNECTED';};state.ws.onerror=()=>toast('Could not connect to game server');}
 function onMessage(msg){
  if(msg.type==='error'){toast(msg.message);return;}
- if(msg.type==='welcome'){state.id=msg.id;state.room=msg.room;history.replaceState(null,'',`/?room=${msg.room}`);screen('lobby');$('roomCode').textContent=msg.room;$('inviteUrl').textContent=location.href;if(state.cameraReady){state.lastCameraReport=null;reportCamera(true);}if(state.selfieData)sendFaceImage();return;}
+ if(msg.type==='welcome'){state.id=msg.id;state.room=msg.room;history.replaceState(null,'',`/?room=${msg.room}`);screen('lobby');$('roomCode').textContent=msg.room;$('inviteUrl').textContent=location.href;if(state.selfieData)sendFaceImage();return;}
  if(msg.type==='signal'){handleSignal(msg).catch(err=>console.warn('Voice signal:',err));return;}if(msg.type==='face'){const img=new Image();img.onload=()=>{state.faceImages.set(msg.id,img);if(state.phase==='lobby')renderLobby();};img.src=msg.image;return;}
  if(msg.type!=='state')return;
  const oldPhase=state.phase, oldHit=state.lastHit, oldRound=state.lastRound;
@@ -64,21 +64,21 @@ function renderLobby(){
     if(imgSrc){const img=document.createElement('img');img.src=imgSrc;img.alt=`${p.name} face`;avatar.append(img);} else {const ph=document.createElement('div');ph.className='placeholder';ph.textContent=avatarEmoji(team);avatar.append(ph);}
     const meta=document.createElement('div');meta.className='meta';
     const name=document.createElement('div');name.className='name';name.textContent=p.name+(p.id===state.id?' (YOU)':'')+(r.players[0]?.id===p.id?' ★':'');
-    const sub=document.createElement('div');sub.className='sub';sub.textContent=p.bot?'BOT PLAYER':p.cameraReady?'TRACKING READY':'ENABLE TRACKING';
+    const sub=document.createElement('div');sub.className='sub';sub.textContent=p.bot?'BOT PLAYER':p.cameraReady?'PHOTO READY':'ADD YOUR PHOTO';
     meta.append(name,sub);
-    const stat=document.createElement('span');stat.className='status '+(p.ready?'yes':'');stat.textContent=p.bot?'🤖 BOT':!p.cameraReady?'📷 ENABLE CAMERA':p.ready?'READY':'WAITING';
+    const stat=document.createElement('span');stat.className='status '+(p.ready?'yes':'');stat.textContent=p.bot?'🤖 BOT':!p.cameraReady?'📸 ADD PHOTO':p.ready?'READY':'WAITING';
     el.append(avatar,meta,stat);
    } else el.textContent=`+ Open slot ${i+1}`;
    list.append(el);
   }
  }
  document.querySelectorAll('[data-size]').forEach(btn=>{btn.classList.toggle('selected',Number(btn.dataset.size)===r.size);btn.disabled=!r.host;});
- $('readyBtn').textContent=r.ready?'✓ READY':r.cameraReady?'I’M READY':'ENABLE CAMERA FIRST'; $('readyBtn').disabled=!r.cameraReady&&!r.ready; $('readyBtn').style.borderColor=r.ready?'#72e7a6':'';
+ $('readyBtn').textContent=r.ready?'✓ READY':r.cameraReady?'I’M READY':'ADD PHOTO FIRST'; $('readyBtn').disabled=!r.cameraReady&&!r.ready; $('readyBtn').style.borderColor=r.ready?'#72e7a6':'';
  $('startBtn').classList.toggle('hidden',!r.host); $('startBtn').disabled=r.players.length!==r.size*2||!r.players.every(p=>p.ready&&(p.bot||p.cameraReady));
  $('fillBots').disabled=!r.host; $('clearBots').disabled=!r.host;
  const mode=$('matchMode'); if(document.activeElement!==mode) mode.value=r.mode; const target=$('targetPoints'); if(document.activeElement!==target) target.value=r.targetPoints; const duration=$('durationMinutes'); if(document.activeElement!==duration) duration.value=r.durationMinutes;
  $('pointsRule').classList.toggle('hidden',r.mode!=='points'); $('timedRule').classList.toggle('hidden',r.mode!=='timed'); for(const el of [mode,target,duration]) el.disabled=!r.host;
- $('lobbyCameraStatus').textContent=r.cameraReady?'◉ FACE TRACKING READY':state.cameraOn?'TRACKER STARTING…':'CAMERA NOT ENABLED';
+ $('lobbyCameraStatus').textContent=r.cameraReady?'✓ FACE PHOTO READY':'CHOOSE YOUR FACE';
  $('recordHighlights').checked=state.recordHighlights; $('recordMic').checked=state.recordMic; $('recordMic').disabled=!state.recordHighlights;
 }
 function renderGameUI(){ $('blueScore').textContent=state.score[0]; $('pinkScore').textContent=state.score[1]; $('matchLabel').textContent=`ROUND ${Math.max(1,state.lastRound||1)} · ${state.roundSpeed.toFixed(1)}×`; $('phaseMessage').textContent=state.phase==='finished'?'MATCH OVER':state.mode==='timed'?`${Math.max(0,Math.ceil((state.matchEndsAt-Date.now())/1000))}s REMAINING`:`FIRST TO ${state.targetPoints} WINS`; $('countdownOverlay').classList.toggle('hidden',state.phase!=='countdown'); if(state.phase==='countdown')$('countdownNumber').textContent=String(Math.max(1,Math.ceil((state.countdownAt-Date.now())/1000))); $('gameOverlay').classList.toggle('hidden',state.phase!=='finished'); }
@@ -110,7 +110,7 @@ function drawPlayer(p,pr,reverse){
  const z=zone(p),own=p.id===state.id; ctx.fillStyle=p.team===0?'#6ae6f50b':'#ff6fae0b';ctx.fillRect(z.x0,z.y0,z.x1-z.x0,z.y1-z.y0);
  if(own){ctx.strokeStyle=colors[p.team]+'66';ctx.setLineDash([4,8]);ctx.lineWidth=1;ctx.strokeRect(z.x0,z.y0,z.x1-z.x0,z.y1-z.y0);ctx.setLineDash([]);} const x=p.x??(z.x0+z.x1)/2,y=p.y??(z.y0+z.y1)/2;
  ctx.save();ctx.translate(x,y); const viewTeam=reverse?1:0; if(reverse ? p.team===viewTeam : p.team!==viewTeam)ctx.rotate(Math.PI);
- ctx.shadowColor=colors[p.team];ctx.shadowBlur=own?21:9; ctx.beginPath();ctx.arc(0,0,pr,0,Math.PI*2); ctx.fillStyle=state.theme==='pink'?'#ffffff':'#000000';ctx.fill();ctx.strokeStyle='#ffffff';ctx.lineWidth=own?4.5:3;ctx.stroke();ctx.shadowBlur=0;ctx.clip();
+ ctx.shadowColor=colors[p.team];ctx.shadowBlur=own?21:9; ctx.beginPath();ctx.arc(0,0,pr,0,Math.PI*2); ctx.strokeStyle='#ffffff';ctx.lineWidth=own?4.5:3;ctx.stroke();ctx.shadowBlur=0;ctx.clip();
  const face=state.faceImages.get(p.id);
  if(face){ctx.drawImage(face,-pr,-pr,pr*2,pr*2);} else {
   ctx.fillStyle='#d6b3aa';ctx.beginPath();ctx.ellipse(0,0,pr*.72,pr*.83,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#171923';ctx.beginPath();ctx.arc(-pr*.22,-pr*.1,pr*.08,0,Math.PI*2);ctx.arc(pr*.22,-pr*.1,pr*.08,0,Math.PI*2);ctx.fill();ctx.lineWidth=Math.max(2,pr*.06);ctx.strokeStyle='#171923';ctx.beginPath();ctx.arc(0,pr*.08,pr*.25,0,Math.PI);ctx.stroke();
@@ -149,37 +149,52 @@ function createCollage(shots){
 }
 function draw(time=0){ requestAnimationFrame(draw); if(!['countdown','playing','finished'].includes(state.phase)) return; if(state.phase==='countdown'||(state.phase==='playing'&&state.mode==='timed')) renderGameUI(); const dpr=window.devicePixelRatio||1,b=canvas.getBoundingClientRect(); if(!b.width) return; const cw=Math.floor(b.width*dpr), ch=Math.floor(b.height*dpr); if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch;} ctx.setTransform(cw/W,0,0,ch/H,0,0); const reverse=flipped(); updateEffects(1/60); ctx.save(); if(reverse){ctx.translate(W,H);ctx.rotate(Math.PI);} drawArenaFX(time); const pr=radius(); for(const p of state.players) drawPlayer(p,pr,reverse); drawBall(); drawEffects(); ctx.restore(); }
 function beep(freq=440,dur=.05){ if(!state.sound) return; try{ const ac=beep.ctx||(beep.ctx=new (window.AudioContext||window.webkitAudioContext)()); const o=ac.createOscillator(),g=ac.createGain(); o.type='triangle'; o.frequency.value=freq; g.gain.value=.02; o.connect(g); g.connect(ac.destination); o.start(); g.gain.exponentialRampToValueAtTime(.0001,ac.currentTime+dur); o.stop(ac.currentTime+dur);}catch{} }
-const MP_VERSION='0.10.35'; const MP_BASES=[`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`,`https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}`]; const MODEL_URL='https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-function trackStatus(message){$('trackingStatus').textContent=message;}
-async function loadFaceTracker(){ const errors=[]; for(const base of MP_BASES){ try{ const vision=await import(`${base}/vision_bundle.mjs`); const files=await vision.FilesetResolver.forVisionTasks(`${base}/wasm`); for(const delegate of ['GPU','CPU']){ try{return await vision.FaceLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:MODEL_URL,delegate},runningMode:'VIDEO',numFaces:1});} catch(e){errors.push(`${delegate} ${base}: ${e.message||e}`);} } } catch(e){errors.push(`Module ${base}: ${e.message||e}`);} } throw new Error(errors.join(' | ').slice(0,600)); }
-async function startCamera(){ if(state.landmarker&&state.cameraOn) return; if(!navigator.mediaDevices?.getUserMedia){trackStatus('HTTPS IS REQUIRED FOR CAMERA');toast('Open the secure https:// game link to use your camera.');return;} try{ if(!state.cameraOn){ state.cameraStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:60,max:60}}}); $('camera').srcObject=state.cameraStream; $('lobbyCamera').srcObject=state.cameraStream; await $('camera').play(); await $('lobbyCamera').play().catch(()=>{}); state.cameraOn=true; } $('cameraLabel').textContent='LIVE';$('enableCamera').textContent='RETRY TRACKER';$('enableCamera').disabled=true; trackStatus('LOADING FACE TRACKING…'); try{ state.landmarker=await loadFaceTracker(); state.lastVideoTime=-1; state.neutral=null; state.lastTrack=0; trackStatus('LOOK AT CAMERA TO CALIBRATE'); $('enableCamera').textContent='CAMERA ON'; requestAnimationFrame(cameraLoop);} catch(err){console.error('Face tracking load error:',err); state.trackingError=String(err.message||err); reportCamera(false); trackStatus('TRACKER LOAD FAILED — TAP RETRY'); $('enableCamera').textContent='RETRY TRACKER';$('enableCamera').disabled=false; toast('Could not load face tracking. Check internet / tracking error in browser console.');}} catch(err){reportCamera(false);console.error('Camera error:',err);toast('Camera unavailable. Check camera permission and HTTPS.');trackStatus('CAMERA PERMISSION / HTTPS ERROR');$('enableCamera').disabled=false;} }
-function reportCamera(ready){ if(state.lastCameraReport!==ready){state.lastCameraReport=ready;state.cameraReady=ready;wsSend({type:'camera',ready});} const label=$('lobbyCameraStatus'); if(label) label.textContent=ready?'◉ FACE TRACKING READY':state.cameraOn?'WAITING FOR FACE / TRACKER':'CAMERA NOT ENABLED'; }
-function clamp01(x){return Math.max(0,Math.min(1,x));}
-function holdStill(value,last,deadZone=.012){return Math.abs(value-last)<deadZone?last:value;}
-function cameraLoop(timestamp){ if(!state.cameraOn||!state.landmarker) return; requestAnimationFrame(cameraLoop); const video=$('camera'); if(video.readyState<2||video.currentTime===state.lastVideoTime) return; if(timestamp-state.lastTrack<16) return; state.lastVideoTime=video.currentTime; state.lastTrack=timestamp; let results; try{results=state.landmarker.detectForVideo(video,timestamp);} catch(err){state.tracking=false;reportCamera(false);trackStatus('TRACKING ERROR — RETRY CAMERA');console.warn('Face detection:',err);return;} const landmarks=results.faceLandmarks?.[0]; if(!landmarks){state.tracking=false;reportCamera(false);trackStatus('NO FACE — LOOK AT CAMERA');return;} const left=landmarks[33],right=landmarks[263],nose=landmarks[1],forehead=landmarks[10],chin=landmarks[152]; if(!left||!right||!nose||!forehead||!chin) return; const roll=Math.atan2(right.y-left.y,right.x-left.x); const eyeWidth=Math.hypot(right.x-left.x,right.y-left.y); const faceHeight=Math.max(.025,Math.hypot(chin.x-forehead.x,chin.y-forehead.y)); const centerX=(forehead.x+chin.x)/2,centerY=(forehead.y+chin.y)/2; const eyeX=(left.x+right.x)/2,eyeY=(left.y+right.y)/2; const yaw=(nose.x-eyeX)/Math.max(.05,eyeWidth); const pitch=(nose.y-eyeY)/faceHeight; const measurement={roll,pitch,yaw,tx:centerX,ty:centerY,scale:eyeWidth}; if(!state.neutral){state.neutral=measurement;state.stillX=.5;state.stillY=.5;state.controlX=.5;state.controlY=.5;state.sentX=.5;state.sentY=.5;state.axisLock='none';toast('Face calibrated. Stay still to hold position.');} const n=state.neutral; const sensitivity=Number($('sensitivity').value)/100*state.headSpeed; const turnX=(measurement.yaw-n.yaw), shiftX=(measurement.tx-n.tx), nodY=(measurement.pitch-n.pitch), shiftY=(measurement.ty-n.ty), tilt=(measurement.roll-n.roll); let hx=.5-((tilt*1.0)-(turnX*1.35)-(shiftX*2.9))*sensitivity; let hy=.5+((nodY*2.45)+(shiftY*3.1))*sensitivity; if(state.track==='translation'){ hx=.5+(shiftX*3.7+turnX*.8)*sensitivity; hy=.5+(shiftY*3.4+nodY*.65)*sensitivity; } hx=clamp01(hx); hy=clamp01(hy); const axisMove=BallfaceAxis.update(state.controlX,state.controlY,hx,hy,state.axisLock); state.controlX=axisMove.x; state.controlY=axisMove.y; state.axisLock=axisMove.axis; state.stillX=state.controlX; state.stillY=state.controlY; state.tracking=true;reportCamera(true);trackStatus('◉ FACE TRACKING ACTIVE'); if(timestamp-state.lastMove>30){const outgoing=BallfaceAxis.update(state.sentX,state.sentY,state.controlX,state.controlY,state.axisLock);state.sentX=outgoing.x;state.sentY=outgoing.y;wsSend({type:'move',...localMove(state.sentX,state.sentY),tracking:true});state.lastMove=timestamp;} if(!state.selfieData&&state.id){takeStillSelfie();} }
+// No face tracker, camera stream, video, or camera permission is used for gameplay.
+// Portrait images are shared once per selection; finger input controls the paddle.
 function sendFaceImage(){if(state.selfieData)wsSend({type:'face',image:state.selfieData});}
 function setStaticSelfie(src,source){
  state.selfieData=src;state.selfieSource=source;
  $('mySelfiePreview').src=src;$('gameSelfiePreview').src=src;$('mySelfiePreview').classList.remove('hidden');$('selfiePlaceholder').classList.add('hidden');
  const image=new Image();image.onload=()=>{if(state.id){state.faceImages.set(state.id,image);renderLobby();}};image.src=src;
- sendFaceImage();toast(source==='upload'?'Photo set!':'Selfie captured!');
+ state.cameraReady=true;sendFaceImage();renderLobby();toast('Face photo selected! Press Ready to play.');
 }
 function cropStillImage(img,source='upload'){
- const c=document.createElement('canvas'),x=c.getContext('2d'),size=112;
- c.width=c.height=size; x.fillStyle=avatarBg();x.fillRect(0,0,size,size);
- x.save();x.beginPath();x.arc(size/2,size/2,size*.465,0,Math.PI*2);x.clip();
- const w=img.naturalWidth||img.videoWidth,h=img.naturalHeight||img.videoHeight;const d=Math.min(w,h)*.84;
+ // Transparent cut-out silhouette. This removes the square image background.
+ // It is not semantic/AI person segmentation: use a close-framed face photo.
+ const size=112,c=document.createElement('canvas');c.width=c.height=size;const x=c.getContext('2d');
+ const w=img.naturalWidth||img.videoWidth,h=img.naturalHeight||img.videoHeight;
+ const d=Math.min(w,h)*0.70;
+ x.save();x.beginPath();x.ellipse(size/2,size/2,size*.39,size*.46,0,0,Math.PI*2);x.clip();
  x.drawImage(img,(w-d)/2,(h-d)/2,d,d,0,0,size,size);x.restore();
- setStaticSelfie(c.toDataURL('image/jpeg',.7),source);
+ setStaticSelfie(c.toDataURL('image/png'),source);
 }
-function takeStillSelfie(){if(!$('camera').videoWidth){toast('Enable your camera first, then take a selfie.');return;}const img=captureLiveFaceDataURL(112);if(img)setStaticSelfie(img,'camera');}
 async function readUploadedSelfie(file){
  if(!file)return;if(!file.type.startsWith('image/')||file.size>8*1024*1024){toast('Choose an image under 8 MB.');return;}
  const url=URL.createObjectURL(file);try{const img=new Image();await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;img.src=url;});cropStillImage(img);}catch{toast('Could not open that image. Try JPG or PNG.');}finally{URL.revokeObjectURL(url);}
 }
 
-function pointerMove(ev){ if(state.phase!=='playing'||state.tracking) return; const p=me(); if(!p) return; const box=canvas.getBoundingClientRect(),point=toCourt((ev.clientX-box.left)/box.width*W,(ev.clientY-box.top)/box.height*H),z=zone(p); const motion=BallfaceAxis.update(state.controlX,state.controlY,(point.x-z.x0)/(z.x1-z.x0),(point.y-z.y0)/(z.y1-z.y0),state.axisLock);state.controlX=motion.x;state.controlY=motion.y;state.axisLock=motion.axis;const outgoing=BallfaceAxis.update(state.sentX,state.sentY,motion.x,motion.y,motion.axis);state.sentX=outgoing.x;state.sentY=outgoing.y;wsSend({type:'move',...localMove(state.sentX,state.sentY),tracking:false}); }
-canvas.addEventListener('pointerdown',e=>{state.touchActive=true;canvas.setPointerCapture(e.pointerId);pointerMove(e);}); canvas.addEventListener('pointermove',e=>{if(e.pointerType==='mouse'||state.touchActive)pointerMove(e);}); canvas.addEventListener('pointerup',()=>{state.touchActive=false;});
+const drag={id:null,x:0,y:0,controlX:.5,controlY:.5};
+function pointerMove(ev){
+ if(drag.id!==ev.pointerId||state.phase!=='playing')return;
+ const p=me();if(!p)return;
+ const box=canvas.getBoundingClientRect();if(!box.width||!box.height)return;
+ const z=zone(p),viewLane=(z.x1-z.x0)/W,viewHeight=(z.y1-z.y0)/H;
+ // Relative drag, not teleport: a finger can start anywhere on the court.
+ // Inverting the court for team pink happens in localMove only.
+ const targetX=drag.controlX+(ev.clientX-drag.x)/(box.width*viewLane);
+ const targetY=drag.controlY+(ev.clientY-drag.y)/(box.height*viewHeight);
+ const motion=BallfaceAxis.update(state.controlX,state.controlY,targetX,targetY,state.axisLock,{deadZone:.003,hysteresis:1.22});
+ state.controlX=motion.x;state.controlY=motion.y;state.axisLock=motion.axis;
+ wsSend({type:'move',...localMove(motion.x,motion.y),tracking:false});
+}
+canvas.addEventListener('pointerdown',ev=>{
+ if(state.phase!=='playing'||drag.id!==null)return;
+ drag.id=ev.pointerId;drag.x=ev.clientX;drag.y=ev.clientY;drag.controlX=state.controlX;drag.controlY=state.controlY;
+ canvas.setPointerCapture(ev.pointerId);
+});
+canvas.addEventListener('pointermove',pointerMove);
+function endDrag(ev){if(drag.id===ev.pointerId){drag.id=null;state.axisLock='none';}}
+canvas.addEventListener('pointerup',endDrag);canvas.addEventListener('pointercancel',endDrag);
 for(const [id,key] of [['ballSpeed','ballSpeed'],['headSpeed','headSpeed'],['gameBallSpeed','ballSpeed'],['gameHeadSpeed','headSpeed']]) $(id).addEventListener('input',ev=>{if(!state.host)return; const value=Number(ev.target.value); state[key]=value; for(const labelId of (key==='ballSpeed'?['ballSpeedValue','gameBallSpeedValue']:['headSpeedValue','gameHeadSpeedValue'])) $(labelId).textContent=`${value.toFixed(1)}×`; wsSend({type:'settings',key,value});});
 
 // WebRTC voice is opt-in and local microphone capture is separate from replay consent.
@@ -300,5 +315,5 @@ $('joinVoice').onclick=joinVoice;$('gameJoinVoice').onclick=joinVoice;$('muteVoi
  catch(err){toast('Music upload failed: '+String(err.message||err).slice(0,100));}
  finally{button.textContent='UPLOAD TO ROOM';button.disabled=!state.host;}
 };$('removeMusic').onclick=()=>wsSend({type:'music',action:'clear'});$('toggleMusic').onclick=()=>{state.musicVisible=!state.musicVisible;renderMusicUI();};$('gameMusicToggle').onclick=()=>{state.musicVisible=!state.musicVisible;renderMusicUI();};$('copyLink').onclick=async()=>{try{await navigator.clipboard.writeText(location.href);toast('Invite link copied!');}catch{prompt('Copy this invite link:',location.href);}};
-document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>wsSend({type:'size',size:Number(b.dataset.size)})); document.querySelectorAll('[data-team]').forEach(b=>b.onclick=()=>wsSend({type:'team',team:Number(b.dataset.team)})); $('readyBtn').onclick=()=>wsSend({type:'ready',ready:!state.ready}); $('startBtn').onclick=()=>wsSend({type:'start'}); $('rematchBtn').onclick=()=>{clearReplayDownloads(); wsSend({type:'rematch'});}; $('enableCamera').onclick=startCamera; $('lobbyEnableCamera').onclick=startCamera; $('takeSelfie').onclick=takeStillSelfie; $('uploadSelfie').onchange=e=>readUploadedSelfie(e.target.files?.[0]); $('fillBots').onclick=()=>wsSend({type:'bots',action:'fill'}); $('clearBots').onclick=()=>wsSend({type:'bots',action:'clear'}); $('calibrateBtn').onclick=()=>{state.neutral=null;state.axisLock='none';toast('Face calibration reset. Look straight ahead.');}; $('modeBtn').onclick=()=>{state.track=state.track==='tilt'?'translation':'tilt';state.neutral=null;$('modeBtn').textContent=state.track==='tilt'?'MODE: ALL HEAD MOVEMENTS':'MODE: HEAD POSITION + LOOK';toast(`Control mode: ${state.track}`);}; for(const id of ['matchMode','targetPoints','durationMinutes']) $(id).addEventListener('change',()=>{if(!state.host)return; wsSend({type:'rules',mode:$('matchMode').value,targetPoints:Number($('targetPoints').value),durationMinutes:Number($('durationMinutes').value)});}); $('soundToggle').onclick=()=>{state.sound=!state.sound;$('soundToggle').textContent=state.sound?'♪':'♪̸';}; $('styleBoy').onclick=()=>{localStorage.setItem('facepong-style','blue');setTheme('blue');}; $('styleGirl').onclick=()=>{localStorage.setItem('facepong-style','pink');setTheme('pink');}; $('recordHighlights').addEventListener('change',e=>{state.recordHighlights=e.target.checked; $('recordMic').disabled=!state.recordHighlights; if(!state.recordHighlights){state.recordMic=false; $('recordMic').checked=false; clearReplayDownloads();}}); $('recordMic').addEventListener('change',e=>{state.recordMic=e.target.checked;}); setInterval(()=>{if(state.phase==='countdown'||state.phase==='playing'&&state.mode==='timed')renderGameUI();},250);
+document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>wsSend({type:'size',size:Number(b.dataset.size)})); document.querySelectorAll('[data-team]').forEach(b=>b.onclick=()=>wsSend({type:'team',team:Number(b.dataset.team)})); $('readyBtn').onclick=()=>wsSend({type:'ready',ready:!state.ready}); $('startBtn').onclick=()=>wsSend({type:'start'}); $('rematchBtn').onclick=()=>{clearReplayDownloads(); wsSend({type:'rematch'});}; $('takePhotoInput').onchange=e=>readUploadedSelfie(e.target.files?.[0]);$('uploadSelfie').onchange=e=>readUploadedSelfie(e.target.files?.[0]); $('fillBots').onclick=()=>wsSend({type:'bots',action:'fill'}); $('clearBots').onclick=()=>wsSend({type:'bots',action:'clear'});  for(const id of ['matchMode','targetPoints','durationMinutes']) $(id).addEventListener('change',()=>{if(!state.host)return; wsSend({type:'rules',mode:$('matchMode').value,targetPoints:Number($('targetPoints').value),durationMinutes:Number($('durationMinutes').value)});}); $('soundToggle').onclick=()=>{state.sound=!state.sound;$('soundToggle').textContent=state.sound?'♪':'♪̸';}; $('styleBoy').onclick=()=>{localStorage.setItem('facepong-style','blue');setTheme('blue');}; $('styleGirl').onclick=()=>{localStorage.setItem('facepong-style','pink');setTheme('pink');}; $('recordHighlights').addEventListener('change',e=>{state.recordHighlights=e.target.checked; $('recordMic').disabled=!state.recordHighlights; if(!state.recordHighlights){state.recordMic=false; $('recordMic').checked=false; clearReplayDownloads();}}); $('recordMic').addEventListener('change',e=>{state.recordMic=e.target.checked;}); setInterval(()=>{if(state.phase==='countdown'||state.phase==='playing'&&state.mode==='timed')renderGameUI();},250);
 const initialRoom=roomFromURL(); if(initialRoom){$('joinCode').value=initialRoom;$('joinForm').classList.remove('hidden');document.body.classList.add('invited');$('joinBtn').textContent='JOIN FRIENDS';$('joinBtn').classList.add('join-green');$('joinConfirm').textContent='JOIN THIS LOBBY →';$('joinConfirm').classList.add('join-green');} setTheme(); requestAnimationFrame(draw);
