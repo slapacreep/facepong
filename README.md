@@ -1,3 +1,7 @@
+## Portrait gameplay (new)
+
+Hold each phone vertically. Your team appears upright at the **bottom**, and opponents appear **upside down at the top**, on every device (team 1 receives a 180° rotated local view). The canonical server court is 650 × 1000: team 0 defends the bottom; team 1 defends the top. Players are divided into horizontal lanes as team size rises from 1v1 to 6v6. Left/right are rebound sidewalls; a goal is scored only once the full ball passes the top or bottom edge. Camera-based movement is transformed per device to match the local viewpoint. The front-camera tracker must still load successfully for hands-free play; mouse/touch remains a fallback for testing.
+
 # FACE PONG — mobile face-controlled multiplayer game
 
 A runnable browser game with shareable private room links, 1v1 / 2v2 / 3v3 / 4v4 / 5v5 / 6v6 matches, phone selfie-camera head tracking, avatar snapshots, server-controlled ball physics and touch/mouse testing fallback.
@@ -73,3 +77,13 @@ These controls work with touch/mouse fallback too. The host must start the match
 ### Update an existing GitHub/Render deployment
 
 Copy the **contents of the `facepong` folder** to the top level of your existing GitHub repo (alongside `package.json`), replacing `server.js`, `test.js`, and the files in `public/`. Commit to the branch Render uses (`main` by default). Render should redeploy on that commit. Build: `npm install`; Start: `npm start`.
+
+## Camera tracker repair (November 2026)
+
+- Face tracking now uses MediaPipe's documented `vision_bundle.mjs` entry point with a second CDN fallback, and tries both GPU and CPU delegates.
+- After granting camera access, allow the tracking model to load; this requires internet access on each player's device. If it fails, tap **RETRY TRACKER**. The browser developer console logs the actual failure.
+- Webcam permission alone does not mean the face-tracker model is ready. The status must say **FACE TRACKING ACTIVE** after it locates your face.
+- Head movement uses each decoded camera frame (up to 60 fps), a tiny stillness dead zone, direct updates with no easing, and no automatic re-centering. **RECALIBRATE** establishes a fresh neutral position.
+- Default mode combines head tilt and head translation; switch modes if the front camera's angle makes tilt awkward. Each player can adjust local sensitivity; host speed multiplier applies to the match.
+- Phone browsers must access the game over **HTTPS** for camera support.
+- The motion calibration and feel still need testing on actual phones and connections; remote network/model downloads are not testable from this development container.

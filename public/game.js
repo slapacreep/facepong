@@ -1,6 +1,6 @@
 const $=id=>document.getElementById(id);
-const W=1000,H=650,colors=['#6ae6f5','#ff6fae'];
-const state={ws:null,id:null,room:null,players:[],size:2,ballSpeed:1,headSpeed:1,phase:'entry',score:[0,0],ball:{x:500,y:325},host:false,ready:false,faceImages:new Map(),track:'tilt',controlX:.5,controlY:.5,neutral:null,landmarker:null,cameraStream:null,cameraOn:false,lastTrack:0,lastMove:0,lastFace:0,tracking:false,sound:true,lastHit:null,lastRound:0,notice:'',touchActive:false};
+const W=650,H=1000,colors=['#6ae6f5','#ff6fae'];
+const state={ws:null,id:null,room:null,players:[],size:2,ballSpeed:1,headSpeed:1,phase:'entry',score:[0,0],ball:{x:325,y:500},host:false,ready:false,faceImages:new Map(),track:'tilt',controlX:.5,controlY:.5,neutral:null,landmarker:null,cameraStream:null,cameraOn:false,lastTrack:0,lastMove:0,lastFace:0,tracking:false,sound:true,lastHit:null,lastRound:0,notice:'',touchActive:false,lastVideoTime:-1,stillX:.5,stillY:.5,trackingError:''};
 const canvas=$('arena'),ctx=canvas.getContext('2d');
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.remove('hidden');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.add('hidden'),3300);}
 function wsSend(payload){if(state.ws?.readyState===WebSocket.OPEN)state.ws.send(JSON.stringify(payload));}
@@ -25,32 +25,147 @@ function renderLobby(){const r=state;$('lobbyCount').textContent=`${r.players.le
 function renderGameUI(){$('blueScore').textContent=state.score[0];$('pinkScore').textContent=state.score[1];$('matchLabel').textContent=`${state.size} VS ${state.size}`;$('phaseMessage').textContent=state.phase==='finished'?'MATCH OVER':'FIRST TO 7 WINS';$('gameOverlay').classList.toggle('hidden',state.phase!=='finished');}
 function finishGame(){const winner=state.score[0]>state.score[1]?0:1;$('overlayTitle').textContent=winner===0?'BLUE WINS!':'PINK WINS!';$('overlayTitle').style.color=colors[winner];$('rematchBtn').classList.toggle('hidden',!state.host);}
 function radius(){return Math.max(14,Math.min(43,65/state.size));}
-function zone(p){const lane=H/state.size;return {x0:p.team===0?38:W/2+38,x1:p.team===0?W/2-38:W-38,y0:p.slot*lane+24,y1:(p.slot+1)*lane-24};}
+function zone(p){
+ const lane=W/state.size,margin=Math.min(24,Math.max(9,lane*.13));
+ return {x0:p.slot*lane+margin,x1:(p.slot+1)*lane-margin,
+  y0:p.team===0?H*.58:50,y1:p.team===0?H-50:H*.42};
+}
+// Team 1 sees the exact same match rotated 180°, so its players are at the bottom.
+function flipped(){return state.players.find(p=>p.id===state.id)?.team===1;}
+function toCourt(x,y){return flipped()?{x:W-x,y:H-y}:{x,y};}
+function localMove(x,y){return flipped()?{x:1-x,y:1-y}:{x,y};}
 function draw(){requestAnimationFrame(draw);if(state.phase!=='playing'&&state.phase!=='finished')return;
- const dpr=window.devicePixelRatio||1;const bounds=canvas.getBoundingClientRect();if(!bounds.width)return;const cw=Math.floor(bounds.width*dpr),ch=Math.floor(bounds.height*dpr);if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch;}ctx.setTransform(cw/W,0,0,ch/H,0,0);ctx.fillStyle='#05070c';ctx.fillRect(0,0,W,H);
- ctx.save();ctx.setLineDash([10,12]);ctx.strokeStyle='#242c3b';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();ctx.restore();ctx.strokeStyle='#1a2330';ctx.lineWidth=2;ctx.strokeRect(1,1,W-2,H-2);
- ctx.fillStyle=colors[0];ctx.globalAlpha=.12;ctx.fillRect(0,0,7,H);ctx.fillStyle=colors[1];ctx.fillRect(W-7,0,7,H);ctx.globalAlpha=1;
- const pr=radius();for(const p of state.players){const z=zone(p);const own=p.id===state.id;ctx.fillStyle=p.team===0?'#6ae6f50b':'#ff6fae0b';ctx.fillRect(z.x0,z.y0,z.x1-z.x0,z.y1-z.y0);if(own){ctx.strokeStyle=colors[p.team]+'66';ctx.setLineDash([4,8]);ctx.lineWidth=1;ctx.strokeRect(z.x0,z.y0,z.x1-z.x0,z.y1-z.y0);ctx.setLineDash([]);}
- const x=p.x??(z.x0+z.x1)/2,y=p.y??(z.y0+z.y1)/2;ctx.save();ctx.shadowColor=colors[p.team];ctx.shadowBlur=own?21:9;ctx.beginPath();ctx.arc(x,y,pr,0,Math.PI*2);ctx.fillStyle=p.team===0?'#153645':'#452037';ctx.fill();ctx.strokeStyle=colors[p.team];ctx.lineWidth=own?4:2.5;ctx.stroke();ctx.shadowBlur=0;ctx.clip();const face=state.faceImages.get(p.id);if(face){ctx.drawImage(face,x-pr,y-pr,pr*2,pr*2);}else{ctx.fillStyle='#d6b3aa';ctx.beginPath();ctx.ellipse(x,y,pr*.72,pr*.83,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#171923';ctx.beginPath();ctx.arc(x-pr*.26,y-pr*.08,pr*.085,0,7);ctx.arc(x+pr*.26,y-pr*.08,pr*.085,0,7);ctx.fill();ctx.strokeStyle='#171923';ctx.lineWidth=pr*.07;ctx.beginPath();ctx.arc(x,y+pr*.19,pr*.26,0,Math.PI);ctx.stroke();}ctx.restore();ctx.fillStyle=own?'#ffffff':'#b8bfcc';ctx.textAlign='center';ctx.font=`${Math.max(13,Math.min(19,pr*.5))}px Space Grotesk`;ctx.fillText(p.name.substring(0,11),x,y+pr+17);if(own){ctx.fillStyle=colors[p.team];ctx.font='bold 12px DM Mono';ctx.fillText('YOU',x,y-pr-9);}}
+ const dpr=window.devicePixelRatio||1,bounds=canvas.getBoundingClientRect();if(!bounds.width)return;
+ const cw=Math.floor(bounds.width*dpr),ch=Math.floor(bounds.height*dpr);
+ if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch;}
+ ctx.setTransform(cw/W,0,0,ch/H,0,0);ctx.fillStyle='#05070c';ctx.fillRect(0,0,W,H);
+ const reverse=flipped();
+ ctx.save();if(reverse){ctx.translate(W,H);ctx.rotate(Math.PI);}
+ ctx.save();ctx.setLineDash([10,12]);ctx.strokeStyle='#242c3b';ctx.lineWidth=2;
+ ctx.beginPath();ctx.moveTo(0,H/2);ctx.lineTo(W,H/2);ctx.stroke();ctx.restore();
+ ctx.strokeStyle='#1a2330';ctx.lineWidth=2;ctx.strokeRect(1,1,W-2,H-2);
+ // Sidelines rebound. The horizontal end lines at top/bottom are goals.
+ ctx.fillStyle=colors[1];ctx.globalAlpha=.22;ctx.fillRect(0,0,W,6);
+ ctx.fillStyle=colors[0];ctx.fillRect(0,H-6,W,6);ctx.globalAlpha=1;
+ const pr=radius();
+ for(const p of state.players){
+  const z=zone(p),own=p.id===state.id;
+  ctx.fillStyle=p.team===0?'#6ae6f50b':'#ff6fae0b';ctx.fillRect(z.x0,z.y0,z.x1-z.x0,z.y1-z.y0);
+  if(own){ctx.strokeStyle=colors[p.team]+'66';ctx.setLineDash([4,8]);ctx.lineWidth=1;ctx.strokeRect(z.x0,z.y0,z.x1-z.x0,z.y1-z.y0);ctx.setLineDash([]);}
+  const x=p.x??(z.x0+z.x1)/2,y=p.y??(z.y0+z.y1)/2;
+  ctx.save();ctx.translate(x,y);
+  // Orient all faces naturally for the local player: your team is upright,
+  // the opposing faces at the top are inverted.
+  const viewTeam=reverse?1:0;
+  if(p.team!==viewTeam)ctx.rotate(Math.PI);
+  ctx.shadowColor=colors[p.team];ctx.shadowBlur=own?21:9;
+  ctx.beginPath();ctx.arc(0,0,pr,0,Math.PI*2);
+  ctx.fillStyle=p.team===0?'#153645':'#452037';ctx.fill();ctx.strokeStyle=colors[p.team];ctx.lineWidth=own?4:2.5;ctx.stroke();ctx.shadowBlur=0;ctx.clip();
+  const face=state.faceImages.get(p.id);
+  if(face){ctx.drawImage(face,-pr,-pr,pr*2,pr*2);}
+  else{ctx.fillStyle='#d6b3aa';ctx.beginPath();ctx.ellipse(0,0,pr*.72,pr*.83,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#171923';ctx.beginPath();ctx.arc(-pr*.26,-pr*.08,pr*.085,0,7);ctx.arc(pr*.26,-pr*.08,pr*.085,0,7);ctx.fill();ctx.strokeStyle='#171923';ctx.lineWidth=pr*.07;ctx.beginPath();ctx.arc(0,pr*.19,pr*.26,0,Math.PI);ctx.stroke();}
+  ctx.restore();
+  // Labels rotate into the viewer's orientation rather than upside down.
+  ctx.save();ctx.translate(x,y);if(reverse)ctx.rotate(Math.PI);
+  ctx.fillStyle=own?'#ffffff':'#b8bfcc';ctx.textAlign='center';ctx.font=`${Math.max(13,Math.min(19,pr*.5))}px Space Grotesk`;
+  ctx.fillText(p.name.substring(0,11),0,pr+17);
+  if(own){ctx.fillStyle=colors[p.team];ctx.font='bold 12px DM Mono';ctx.fillText('YOU',0,-pr-9);}
+  ctx.restore();
+ }
  if(state.phase==='playing'){const b=state.ball;ctx.save();ctx.shadowColor='#fff0a0';ctx.shadowBlur=18;ctx.fillStyle='#fff0a0';ctx.beginPath();ctx.arc(b.x,b.y,8,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;ctx.restore();}
+ ctx.restore();
 }
 function beep(f=460,seconds=.08){if(!state.sound)return;try{const ac=beep.ac||(beep.ac=new (window.AudioContext||window.webkitAudioContext)());const o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(.065,ac.currentTime);g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+seconds);o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+seconds);}catch{}}
-// Front-camera tracking: MediaPipe FaceLandmarker (GPU/CPU), no landmark data uploaded.
-async function startCamera(){if(state.cameraOn)return;try{state.cameraStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:30,max:30}}});$('camera').srcObject=state.cameraStream;await $('camera').play();state.cameraOn=true;$('cameraLabel').textContent='LIVE';$('enableCamera').textContent='CAMERA ON';$('enableCamera').disabled=true;$('trackingStatus').textContent='LOADING FACE TRACKING…';
- try{const vision=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm');const files=await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');let detector;try{detector=await vision.FaceLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',delegate:'GPU'},runningMode:'VIDEO',numFaces:1});}catch{detector=await vision.FaceLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',delegate:'CPU'},runningMode:'VIDEO',numFaces:1});}state.landmarker=detector;$('trackingStatus').textContent='FACE TRACKING ACTIVE';requestAnimationFrame(cameraLoop);}catch(err){console.warn(err);$('trackingStatus').textContent='TRACKER NOT AVAILABLE';toast('Tracker could not load. Touch/mouse controls available.');}
- }catch(err){toast('Camera permission denied or unavailable. Use touch/mouse controls.');$('trackingStatus').textContent='TOUCH MODE';}}
-function cameraLoop(timestamp){if(!state.cameraOn)return;requestAnimationFrame(cameraLoop);if(!state.landmarker||timestamp-state.lastTrack<32)return;const video=$('camera');if(video.readyState<2)return;state.lastTrack=timestamp;let results;try{results=state.landmarker.detectForVideo(video,timestamp);}catch{return;}const landmarks=results.faceLandmarks?.[0];if(!landmarks){state.tracking=false;$('trackingStatus').textContent='LOOK AT FRONT CAMERA';return;}const left=landmarks[33],right=landmarks[263],nose=landmarks[1],forehead=landmarks[10],chin=landmarks[152];if(!left||!right||!nose)return;
- const roll=Math.atan2(right.y-left.y,right.x-left.x),eyeWidth=Math.hypot(right.x-left.x,right.y-left.y),midY=(forehead.y+chin.y)/2;
- // pitch proxy: nose vertical position relative to face; neutral calibration corrects differing faces/camera angles.
- const pitch=(nose.y-midY)/Math.max(.01,chin.y-forehead.y);const measurement={roll,pitch,tx:nose.x,ty:nose.y,scale:eyeWidth};if(!state.neutral){state.neutral=measurement;toast('Face calibrated! Tilt your head to move.');}
- const neutral=state.neutral,sensitivity=Number($('sensitivity').value)/100*state.headSpeed;
- let hx,hy;if(state.track==='tilt'){hx=.5+(measurement.roll-neutral.roll)*1.6*sensitivity;hy=.5+(measurement.pitch-neutral.pitch)*4.1*sensitivity;}else{hx=.5-(measurement.tx-neutral.tx)*2.6*sensitivity;hy=.5+(measurement.ty-neutral.ty)*2.5*sensitivity;}
- state.controlX=Math.max(0,Math.min(1,hx));state.controlY=Math.max(0,Math.min(1,hy));state.tracking=true;$('trackingStatus').textContent='◉ FACE TRACKING ACTIVE';
- if(timestamp-state.lastMove>42){wsSend({type:'move',x:state.controlX,y:state.controlY,tracking:true});state.lastMove=timestamp;}
+// Browser-based front camera tracking. Load the official MediaPipe ESM bundle; try a mirror if blocked.
+// Landmarks remain on the player's phone; only normalized movement enters the game websocket.
+const MP_VERSION='0.10.35';
+const MP_BASES=[`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`,`https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}`];
+const MODEL_URL='https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+function trackStatus(message){$('trackingStatus').textContent=message;}
+async function loadFaceTracker(){
+ const errors=[];
+ for(const base of MP_BASES){
+  try{
+   const vision=await import(`${base}/vision_bundle.mjs`);
+   const files=await vision.FilesetResolver.forVisionTasks(`${base}/wasm`);
+   for(const delegate of ['GPU','CPU']){
+    try{return await vision.FaceLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:MODEL_URL,delegate},runningMode:'VIDEO',numFaces:1});}
+    catch(e){errors.push(`${delegate} ${base}: ${e.message||e}`);}
+   }
+  }catch(e){errors.push(`Module ${base}: ${e.message||e}`);}
+ }
+ throw new Error(errors.join(' | ').slice(0,600));
+}
+async function startCamera(){
+ if(state.landmarker&&state.cameraOn)return;
+ if(!navigator.mediaDevices?.getUserMedia){trackStatus('HTTPS IS REQUIRED FOR CAMERA');toast('Open the secure https:// game link to use your camera.');return;}
+ try{
+  if(!state.cameraOn){
+   state.cameraStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:60,max:60}}});
+   $('camera').srcObject=state.cameraStream;
+   await $('camera').play();state.cameraOn=true;
+  }
+  $('cameraLabel').textContent='LIVE';$('enableCamera').textContent='RETRY TRACKER';$('enableCamera').disabled=true;
+  trackStatus('LOADING FACE TRACKING…');
+  try{
+   state.landmarker=await loadFaceTracker();state.lastVideoTime=-1;state.neutral=null;state.lastTrack=0;
+   trackStatus('LOOK AT CAMERA TO CALIBRATE');$('enableCamera').textContent='CAMERA ON';
+   requestAnimationFrame(cameraLoop);
+  }catch(err){
+   console.error('Face tracking load error:',err);
+   state.trackingError=String(err.message||err);
+   trackStatus('TRACKER LOAD FAILED — TAP RETRY');
+   $('enableCamera').textContent='RETRY TRACKER';$('enableCamera').disabled=false;
+   toast('Could not load face tracking. Check internet / tracking error in browser console.');
+  }
+ }catch(err){console.error('Camera error:',err);toast('Camera unavailable. Check camera permission and HTTPS.');trackStatus('CAMERA PERMISSION / HTTPS ERROR');$('enableCamera').disabled=false;}
+}
+function clamp01(x){return Math.max(0,Math.min(1,x));}
+function holdStill(value,last,deadZone=.008){return Math.abs(value-last)<deadZone?last:value;}
+function cameraLoop(timestamp){
+ if(!state.cameraOn||!state.landmarker)return;
+ requestAnimationFrame(cameraLoop);
+ const video=$('camera');
+ if(video.readyState<2||video.currentTime===state.lastVideoTime)return;
+ if(timestamp-state.lastTrack<16)return; // up to 60 updates/sec when device can handle it
+ state.lastVideoTime=video.currentTime;state.lastTrack=timestamp;
+ let results;
+ try{results=state.landmarker.detectForVideo(video,timestamp);}
+ catch(err){state.tracking=false;trackStatus('TRACKING ERROR — RETRY CAMERA');console.warn('Face detection:',err);return;}
+ const landmarks=results.faceLandmarks?.[0];
+ if(!landmarks){state.tracking=false;trackStatus('NO FACE — LOOK AT CAMERA');return;}
+ const left=landmarks[33],right=landmarks[263],nose=landmarks[1],forehead=landmarks[10],chin=landmarks[152];
+ if(!left||!right||!nose||!forehead||!chin)return;
+ const roll=Math.atan2(right.y-left.y,right.x-left.x);
+ const eyeWidth=Math.hypot(right.x-left.x,right.y-left.y);
+ const faceHeight=Math.max(.025,Math.hypot(chin.x-forehead.x,chin.y-forehead.y));
+ const midY=(forehead.y+chin.y)/2;
+ const pitch=(nose.y-midY)/faceHeight;
+ const measurement={roll,pitch,tx:nose.x,ty:nose.y,scale:eyeWidth};
+ if(!state.neutral){state.neutral=measurement;state.stillX=.5;state.stillY=.5;toast('Face calibrated. Stay still to hold position.');}
+ const neutral=state.neutral;
+ const sensitivity=Number($('sensitivity').value)/100*state.headSpeed;
+ let hx,hy;
+ if(state.track==='tilt'){
+  // Roll steers horizontally; pitch steers vertically. Small real translations also count,
+  // so lifting/lowering the head works even without an exaggerated nod.
+  hx=.5+((measurement.roll-neutral.roll)*1.65-(measurement.tx-neutral.tx)*.55)*sensitivity;
+  hy=.5+((measurement.pitch-neutral.pitch)*3.8+(measurement.ty-neutral.ty)*1.55)*sensitivity;
+ }else{
+  hx=.5-(measurement.tx-neutral.tx)*3.4*sensitivity;
+  hy=.5+(measurement.ty-neutral.ty)*3.2*sensitivity;
+ }
+ hx=clamp01(hx);hy=clamp01(hy);
+ // No auto-centering / no easing. Ignore only sub-pixel tracking noise.
+ state.controlX=holdStill(hx,state.stillX);
+ state.controlY=holdStill(hy,state.stillY);
+ state.stillX=state.controlX;state.stillY=state.controlY;
+ state.tracking=true;trackStatus('◉ FACE TRACKING ACTIVE');
+ if(timestamp-state.lastMove>30){wsSend({type:'move',...localMove(state.controlX,state.controlY),tracking:true});state.lastMove=timestamp;}
  if(timestamp-state.lastFace>3800&&state.id){state.lastFace=timestamp;sendFaceImage();}
 }
 function sendFaceImage(){const v=$('camera');if(!v.videoWidth)return;const c=$('previewCanvas'),x=c.getContext('2d');const dimension=Math.min(v.videoWidth,v.videoHeight);c.width=96;c.height=96;x.save();x.translate(96,0);x.scale(-1,1);x.drawImage(v,(v.videoWidth-dimension)/2,(v.videoHeight-dimension)/2,dimension,dimension,0,0,96,96);x.restore();wsSend({type:'face',image:c.toDataURL('image/jpeg',.55)});}
-function pointerMove(ev){if(state.phase!=='playing'||state.tracking)return;const p=state.players.find(p=>p.id===state.id);if(!p)return;const box=canvas.getBoundingClientRect(),x=(ev.clientX-box.left)/box.width*W,y=(ev.clientY-box.top)/box.height*H,z=zone(p);state.controlX=Math.max(0,Math.min(1,(x-z.x0)/(z.x1-z.x0)));state.controlY=Math.max(0,Math.min(1,(y-z.y0)/(z.y1-z.y0)));wsSend({type:'move',x:state.controlX,y:state.controlY,tracking:false});}
+function pointerMove(ev){if(state.phase!=='playing'||state.tracking)return;const p=state.players.find(p=>p.id===state.id);if(!p)return;const box=canvas.getBoundingClientRect(),point=toCourt((ev.clientX-box.left)/box.width*W,(ev.clientY-box.top)/box.height*H),x=point.x,y=point.y,z=zone(p);state.controlX=Math.max(0,Math.min(1,(x-z.x0)/(z.x1-z.x0)));state.controlY=Math.max(0,Math.min(1,(y-z.y0)/(z.y1-z.y0)));wsSend({type:'move',x:state.controlX,y:state.controlY,tracking:false});}
 canvas.addEventListener('pointerdown',e=>{state.touchActive=true;canvas.setPointerCapture(e.pointerId);pointerMove(e);});canvas.addEventListener('pointermove',e=>{if(e.pointerType==='mouse'||state.touchActive)pointerMove(e);});canvas.addEventListener('pointerup',()=>{state.touchActive=false;});
 for(const [id,key] of [['ballSpeed','ballSpeed'],['headSpeed','headSpeed'],['gameBallSpeed','ballSpeed'],['gameHeadSpeed','headSpeed']]){
  $(id).addEventListener('input',ev=>{if(!state.host)return;const value=Number(ev.target.value);state[key]=value;

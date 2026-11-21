@@ -7,7 +7,7 @@ const PORT = Number(process.env.PORT || 3000);
 const ROOT = path.join(__dirname, 'public');
 const ORIGIN = process.env.PUBLIC_ORIGIN || '';
 const rooms = new Map();
-const WIDTH=1000, HEIGHT=650, RADIUS=8, TICK=1000/30;
+const WIDTH=650, HEIGHT=1000, RADIUS=8, TICK=1000/30;
 const MIME={'.html':'text/html; charset=utf-8','.js':'application/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon'};
 function broadcast(room,obj){const msg=JSON.stringify(obj);for(const p of room.players)if(p.socket&&!p.socket.destroyed)send(p.socket,msg);}
 function send(s,msg){if(s.destroyed)return;const data=Buffer.from(msg),length=data.length;let head;if(length<126){head=Buffer.from([129,length]);}else if(length<65536){head=Buffer.alloc(4);head[0]=129;head[1]=126;head.writeUInt16BE(length,2);}else{head=Buffer.alloc(10);head[0]=129;head[1]=127;head.writeBigUInt64BE(BigInt(length),2);}s.write(Buffer.concat([head,data]));}
@@ -23,7 +23,13 @@ function safeRoom(id){return typeof id==='string'&&/^[A-Z2-9]{5,7}$/.test(id);}
 function playerSummary(p){return {id:p.id,name:p.name,team:p.team,slot:p.slot,x:p.x,y:p.y,ready:p.ready,tracking:p.tracking};}
 function snapshot(r){return {type:'state',room:r.id,phase:r.phase,size:r.size,ballSpeed:r.ballSpeed,headSpeed:r.headSpeed,players:r.players.map(playerSummary),score:r.score,ball:r.ball,round:r.round,lastHit:r.lastHit,gameOver:r.gameOver};}
 function rearrange(r){for(let team=0;team<2;team++){const players=r.players.filter(p=>p.team===team);players.forEach((p,i)=>{p.slot=i;const range=zone(r,p);p.x=Math.max(range.minX,Math.min(range.maxX,p.x??(range.minX+range.maxX)/2));p.y=(range.minY+range.maxY)/2;});}}
-function zone(r,p){const n=r.size,slot=Math.min(p.slot,n-1),g=HEIGHT/n;return {minX:p.team===0?38:WIDTH/2+38,maxX:p.team===0?WIDTH/2-38:WIDTH-38,minY:slot*g+24,maxY:(slot+1)*g-24};}
+function zone(r,p){
+ const n=r.size,slot=Math.min(p.slot,n-1),lane=WIDTH/n;
+ // Each player owns one horizontal lane on their team's half of the portrait court.
+ const margin=Math.min(24,Math.max(9,lane*.13));
+ return {minX:slot*lane+margin,maxX:(slot+1)*lane-margin,
+  minY:p.team===0?HEIGHT*.58:50,maxY:p.team===0?HEIGHT-50:HEIGHT*.42};
+}
 function playerRadius(r){return Math.max(14,Math.min(43,65/r.size));}
 function chooseTeam(r){const c=[r.players.filter(p=>p.team===0).length,r.players.filter(p=>p.team===1).length];return c[0]<=c[1]?0:1;}
 function onMessage(socket,old,msg){if(!msg||typeof msg.type!=='string')return old;
@@ -49,11 +55,11 @@ function onMessage(socket,old,msg){if(!msg||typeof msg.type!=='string')return ol
 }
 function leave(socket,session){if(!session)return;const r=rooms.get(session.room);if(!r)return;r.players=r.players.filter(p=>p.id!==session.player);if(!r.players.length){rooms.delete(r.id);return;}if(r.phase==='playing'){r.phase='lobby';r.players.forEach(p=>p.ready=false);resetBall(r);}rearrange(r);broadcast(r,snapshot(r));}
 function resetBall(r){r.ball={x:WIDTH/2,y:HEIGHT/2,vx:0,vy:0};r.lastHit=null;r.serveAt=Date.now()+1400;r.round++;}
-function tick(r,dt){if(r.phase!=='playing')return;const b=r.ball;if(r.serveAt){if(Date.now()<r.serveAt)return;r.serveAt=0;const dir=Math.random()<.5?-1:1;b.vx=dir*310*r.ballSpeed;b.vy=(Math.random()-.5)*270*r.ballSpeed;}
+function tick(r,dt){if(r.phase!=='playing')return;const now=Date.now();for(const p of r.players){if(now-p.lastMove>110){p.vx=0;p.vy=0;}}const b=r.ball;if(r.serveAt){if(Date.now()<r.serveAt)return;r.serveAt=0;const dir=Math.random()<.5?-1:1;b.vy=dir*310*r.ballSpeed;b.vx=(Math.random()-.5)*270*r.ballSpeed;}
  const substeps=3,step=dt/substeps,pr=playerRadius(r);for(let n=0;n<substeps;n++){
  b.x+=b.vx*step;b.y+=b.vy*step;
- // Top and bottom are solid rebound walls: touching either never awards points.
- if(b.y<RADIUS){b.y=RADIUS;b.vy=Math.abs(b.vy);}if(b.y>HEIGHT-RADIUS){b.y=HEIGHT-RADIUS;b.vy=-Math.abs(b.vy);}
+ // Left/right are solid side walls; top/bottom are the scoring goal lines.
+ if(b.x<RADIUS){b.x=RADIUS;b.vx=Math.abs(b.vx);}if(b.x>WIDTH-RADIUS){b.x=WIDTH-RADIUS;b.vx=-Math.abs(b.vx);}
  // Once the ball has moved clear of the most recent hitter, let that face hit again.
  if(r.lastHit){const hitter=r.players.find(p=>p.id===r.lastHit);if(!hitter||Math.hypot(b.x-hitter.x,b.y-hitter.y)>pr+RADIUS+4)r.lastHit=null;}
  for(const p of r.players){const dist=Math.hypot(b.x-p.x,b.y-p.y),minDist=pr+RADIUS;if(dist>=minDist||dist<.01||r.lastHit===p.id)continue;
@@ -62,13 +68,13 @@ function tick(r,dt){if(r.phase!=='playing')return;const b=r.ball;if(r.serveAt){i
  const incoming=Math.hypot(b.vx,b.vy);const swing=Math.max(0,p.vx*nx+p.vy*ny);const speed=Math.min(1150*r.ballSpeed,Math.max(220*r.ballSpeed,incoming*.9+swing*.48*r.ballSpeed+70*r.ballSpeed));
  const impulseX=nx*speed+p.vx*.12,impulseY=ny*speed+p.vy*.12;const magnitude=Math.hypot(impulseX,impulseY)||1;b.vx=impulseX/magnitude*speed;b.vy=impulseY/magnitude*speed;
  // Return shots toward opponent more consistently; still permits angled teammate passes.
- if(p.team===0&&b.vx<85)b.vx=Math.max(85,Math.abs(b.vx)*.6);
- if(p.team===1&&b.vx>-85)b.vx=-Math.max(85,Math.abs(b.vx)*.6);
+ if(p.team===0&&b.vy>-85)b.vy=-Math.max(85,Math.abs(b.vy)*.6);
+ if(p.team===1&&b.vy<85)b.vy=Math.max(85,Math.abs(b.vy)*.6);
  r.lastHit=p.id;break;
  }
  // Only concede when the *entire ball* crosses the end goal line behind a team.
- // Left goal -> right team scores; right goal -> left team scores.
- if(b.x+RADIUS<0 || b.x-RADIUS>WIDTH){const scoring=b.x+RADIUS<0?1:0;r.score[scoring]++;if(r.score[scoring]>=7){r.phase='finished';r.gameOver=true;r.ball.vx=0;r.ball.vy=0;}else resetBall(r);break;}
+ // Top goal (behind team 1) -> team 0 scores; bottom goal -> team 1 scores.
+ if(b.y+RADIUS<0 || b.y-RADIUS>HEIGHT){const scoring=b.y+RADIUS<0?0:1;r.score[scoring]++;if(r.score[scoring]>=7){r.phase='finished';r.gameOver=true;r.ball.vx=0;r.ball.vy=0;}else resetBall(r);break;}
  }
 }
 const server=http.createServer((req,res)=>{let p;try{p=decodeURIComponent(new URL(req.url,'http://localhost').pathname);}catch{res.writeHead(400).end();return;}if(p==='/health'){res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({ok:true,rooms:rooms.size}));return;}if(p==='/config'){res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({origin:ORIGIN}));return;}p=path.normalize(p).replace(/^([/\\]*\.\.[/\\])+/, '');if(p==='/'||!path.extname(p))p='/index.html';const full=path.resolve(ROOT,'.'+p);if(!full.startsWith(ROOT+path.sep)){res.writeHead(403).end();return;}fs.readFile(full,(err,data)=>{if(err){res.writeHead(404).end('Not found');return;}res.writeHead(200,{'Content-Type':MIME[path.extname(full)]||'application/octet-stream','Cache-Control':'no-cache'}).end(data);});});
